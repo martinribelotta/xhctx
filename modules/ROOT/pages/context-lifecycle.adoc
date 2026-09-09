@@ -1,0 +1,137 @@
+[#context-lifecycle]
+= Context (Hart) Lifecycle
+
+== Abandonment is not `WFI`
+
+Voluntary abandonment is performed by writing `mctxctl` -- never by
+`wfi` (xref:compatibility.adoc[Chapter 10]). This is the *voluntary*
+trigger for a hart switch. All other triggers are involuntary,
+hardware-initiated, and reuse the same one-cycle squash-and-redirect
+mechanism (xref:microarchitecture.adoc[Chapter 11]), but they are not
+all alike:
+
+* *Priority preemption* (xref:priority-preemption.adoc[Section 6.2]) --
+  can occur on any cycle; always resumable, since nothing about the
+  preempted hart's own state changed.
+* *Synchronous exception* (Case D below) -- hardware-forced, but
+  *terminal*: the faulted hart is not automatically resumable
+  (xref:exception-delivery.adoc[Chapter 8]).
+* *`ecall` from U-mode* (Case E below) -- hardware-forced, but
+  *resumable*: it is an intentional request, not a fault, so the
+  calling hart is expected to run again once serviced.
+
+== Cases
+
+*Case A -- pending events for the same hart.*
+
+[source]
+----
+consume next event
+update mevent
+continue executing the same hart
+active_ctx unchanged
+----
+
+Functionally a NOP with respect to the hart switch.
+
+*Case B -- pending events for other harts.*
+
+[source]
+----
+current hart → waiting
+Event Fabric selects the highest-priority ready hart
+active_ctx updated
+----
+
+*Case C -- no pending events anywhere.*
+
+[source]
+----
+processor enters Idle/Sleep
+the next event reactivates the corresponding hart
+----
+
+*Case D -- synchronous exception.* See
+xref:exception-delivery.adoc[Chapter 8].
+
+*Case E -- `ecall` from U-mode (syscall request).*
+
+[source]
+----
+1. the calling hart is force-abandoned (hardware trigger, not a
+   mctxctl write); its live PC is frozen at the instruction AFTER the
+   ecall -- unlike Case D, this hart is expected to run again
+2. one entry is pushed to the FIFO of the hart named by this caller's
+   ECALL_BASE + ctx_id routing entry (event-fabric.adoc, Section 4.3),
+   firmware-configured per calling hart
+3. event_data = mectx (the id of the calling hart) -- the same pattern
+   as Case D's exception delivery
+4. request parameters beyond mectx travel via an in-memory descriptor
+   (xref:software-events.adoc[Chapter 5]), not via the event payload,
+   since the U-mode caller cannot write meventdata to stage one
+----
+
+The service hart replies with an *ordinary* software-sourced event
+(`mevent`/`meventdata`, `SW_TARGET_BASE + mectx`,
+xref:software-events.adoc[Section 5.1]) -- no new mechanism is needed
+for the reply direction, only for the initial U-mode-to-M-mode request,
+since only that direction is blocked by `mevent`/`meventdata` being
+M-mode-only CSRs (xref:csrs.adoc[Section 3.0]). When that reply
+arrives, the calling hart is reactivated exactly like any other Case
+A/B dispatch, resuming at its own frozen PC -- functionally a return,
+implemented as ordinary event reactivation rather than a dedicated
+instruction. `mret` was deliberately not revived for this: it would
+need an implicit, single-slot "reply to" register that a second
+`ecall` arriving before the first is answered would silently clobber,
+whereas the ordinary event path keeps that bookkeeping in a hart's own
+general-purpose registers, immune to that hazard.
+
+`ecall` executed from M-mode is unaffected by this Case: M-mode code
+already has full access to `mevent`/`meventdata` and has no need for a
+routed request mechanism, so it retains the generic Case D (fault)
+treatment. `ecall` from S-mode is undefined, tracking S-mode's
+out-of-scope status (xref:csrs.adoc[Section 3.0]).
+
+== Minimal per-hart lifecycle state
+
+To avoid an RTOS-style state machine, the only state ideally required
+is:
+
+[source]
+----
+waiting[N-1:0]
+----
+
+with all other states implicit:
+
+[source]
+----
+RUNNING   → ctx == active_ctx
+WAITING   → waiting = 1
+SUSPENDED → ctx != active_ctx && waiting = 0
+----
+
+`READY`, `BLOCKED`, and `TERMINATED` states SHALL NOT be introduced
+absent a demonstrated need. Additional per-hart state exists outside
+this implicit machine: `mepc`/`mcause` (populated only on exception,
+xref:csrs.adoc[Chapter 3]) and, for debug
+(xref:microarchitecture.adoc[Chapter 11]), one per-hart mask bit
+excluded from this state model.
+
+== Boot sequence
+
+Reset activates a single, implementation-defined reset hart (`ctx0` by
+convention):
+
+[source]
+----
+waiting[N-1:1] = 0
+ctx0 running from the reset PC
+----
+
+All other harts start suspended, `waiting = 0`. Initialization of
+`ctx1..ctx(N-1)` is performed *entirely in software*: `ctx0` addresses
+each one through the standard event mechanism
+(xref:software-events.adoc[Section 5.1], `SW_TARGET_BASE` range). No
+dedicated hardware initialization path is required beyond bringing up
+the single reset hart.

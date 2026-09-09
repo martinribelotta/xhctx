@@ -1,0 +1,86 @@
+[#software-events]
+= Software-Sourced Events
+
+== Emission sequence
+
+Software emits an event by writing:
+
+[source]
+----
+meventdata      ; stage payload (self slot only)
+mevent          ; specify destination event_id, trigger push
+----
+
+The write to `mevent` captures the payload most recently written to
+`meventdata` and injects it into the Event Fabric, directed at the
+`event_id` just written.
+
+To address an arbitrary destination hart rather than a fixed routing
+source, software writes an `event_id` from the `SW_TARGET_BASE +
+ctx_id` range (xref:event-fabric.adoc[Section 4.3]).
+
+No `SEV`-style instruction exists; event emission is entirely a CSR
+interface, requiring no new instruction encoding
+(xref:compatibility.adoc[Chapter 10]).
+
+== Request/response patterns (IPC) are a firmware convention
+
+`Xhctx` provides no synchronous call/return primitive (see
+xref:compatibility.adoc[Chapter 10] on `mret`). A request from one hart
+to a service hart, and that service's eventual reply, are two ordinary,
+independent events -- there is no architectural notion of a "call" that
+ties them together.
+
+This has two direct consequences, both left to firmware, not to the
+ISA:
+
+* *Payloads wider than one word* (e.g. a buffer address and length) do
+  not fit in a single `event_data`. Such requests carry a pointer/index
+  into an in-memory descriptor instead, with the descriptor format
+  defined by firmware convention for that service, not standardized
+  here.
+* *Knowing who to reply to* is not hardware-guaranteed: nothing in the
+  Event Fabric stamps the true origin of a software-sourced event onto
+  its delivery (unlike the exception path, xref:exception-delivery.adoc[Chapter 8],
+  where hardware supplies `mectx`). A service hart that needs to reply
+  relies on the requester including its own `ctx_id` in the request
+  payload/descriptor, or on a static firmware/routing convention (e.g.
+  "requests arriving on this channel always originate from hart 5").
+  Adding a hardware-stamped sender id was considered and deliberately
+  left out in favor of resolving this in firmware.
+
+== FIFOs, mandatory bypass, and overflow
+
+Each hart has an independent FIFO:
+
+[source]
+----
+FIFO[0] .. FIFO[N-1]
+----
+
+storing only `event_id`/`event_data` pairs; the destination hart is
+implicit from FIFO membership.
+
+*Mandatory bypass.* Events SHALL NOT be queued by default. If an event
+can be served immediately, it activates the destination hart directly;
+the FIFO is used only when the event cannot be dispatched on the
+following cycle. This is required to achieve minimum latency.
+
+*Overflow.* FIFO depth is implementation-defined (e.g. 1, 2, 4, 16, 128
+entries). Regardless of depth, overflow SHALL be handled through
+*backpressure to the producer*, not silent drop, preserving the
+determinism goal under bursty sources.
+
+*Simultaneous events.* Two events arriving in the same cycle with
+different destinations do not contend -- each is pushed to its own
+FIFO independently. Events with the same destination are queued in
+arrival order within that FIFO. The only real tie-break is contention
+for the single bypass dispatch slot: it is resolved with the same
+fixed `context_id` priority defined in
+xref:priority-preemption.adoc[Chapter 6], using no additional
+arbitration hardware beyond the priority encoder already required.
+
+*Delivery order.* Whether relative delivery order between a
+bypass-served event and a previously queued one is preserved is
+*implementation-defined*; the architecture makes no guarantee either
+way.

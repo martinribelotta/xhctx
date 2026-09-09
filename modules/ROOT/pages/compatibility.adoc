@@ -1,0 +1,61 @@
+[#compatibility]
+= RV32E ISA Compatibility
+
+The extension preserves RV32E, the standard ABI, ELF conventions, and
+the standard C toolchain. `Xhctx` is an experimental extension, not an
+independent ISA, and is named `Xhctx` ("Hart Context") per the RISC-V
+`X`-prefix convention for non-standard extensions: a single `X`
+followed by an alphanumeric name ending in a letter.
+
+`Xhctx` depends on the standard `Smcsrind` extension
+(xref:csrs.adoc[Section 3.2]). Per the ISA naming conventions, standard
+extensions are listed before non-standard ones, and non-standard
+extensions are ordered alphabetically among themselves and
+underscore-separated from other multi-letter extensions:
+
+[source]
+----
+RV32E_Smcsrind_Xhctx
+----
+
+*No new instruction encoding is introduced.* Every `Xhctx` mechanism
+(`mctxctl`, `mevent`, `meventdata`, plus the cross-hart read window via
+`Smcsrind`) is accessed through the existing
+`CSRRW`/`CSRRS`/`CSRRC` family on CSR addresses. The base opcode map is
+untouched, avoiding any risk of collision with other extensions and
+requiring only CSR-name awareness -- not new decoder logic -- from an
+updated toolchain.
+
+== Disposition of `mret`, `wfi`, and `ecall`
+
+All three are valid base-ISA instructions that a compiler or legacy
+code may emit; their behavior is defined explicitly rather than left
+undefined. None of this introduces a new encoding -- `ecall` in
+particular keeps its standard opcode; only its architectural effect is
+redefined, and only when executed from U-mode.
+
+* *`mret`* cannot execute under this system model. It is treated as an
+  illegal instruction and triggers Case D
+  (xref:exception-delivery.adoc[Chapter 8]), delivered as an event to
+  the exception hart. No valid `Xhctx` program should ever execute it.
+  This is not merely a policy choice: no operation anywhere in `Xhctx`
+  -- including inter-hart request/response
+  (xref:software-events.adoc[Chapter 5]) and exception recovery
+  (xref:exception-delivery.adoc[Chapter 8]) -- restores a
+  precisely-suspended computation and continues it. Every reactivation
+  is a fresh dispatch driven by an event, so `mret`'s core capability
+  (resume exactly where execution was interrupted, with restored state)
+  has no counterpart to repurpose it into.
+* *`wfi`* is a *NOP*. It has no effect on scheduling
+  (xref:context-lifecycle.adoc[Section 7.2], Case C already covers "no
+  more work"). This choice, rather than treating `wfi` as illegal,
+  avoids breaking binaries that emit it as part of a conventional idle
+  loop.
+* *`ecall` from U-mode* is the sole channel by which a U-mode hart can
+  reach the Event Fabric at all, since it has no access to `mevent`/
+  `meventdata` (xref:csrs.adoc[Section 3.0]). It triggers Case E
+  (xref:context-lifecycle.adoc[Section 7.2]) -- a hardware-forced,
+  *resumable* abandonment routed to a per-hart, firmware-configured
+  destination, unlike the terminal Case D used for genuine faults.
+  `ecall` from M-mode is unaffected: M-mode code already has full CSR
+  access and retains the generic Case D treatment.

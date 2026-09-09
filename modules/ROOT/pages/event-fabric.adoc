@@ -1,0 +1,67 @@
+[#event-fabric]
+= Event Fabric and Routing
+
+== Event sources
+
+Events may originate from:
+
+* External IRQ lines
+* Timers
+* DMA
+* GPIO
+* Ethernet
+* Other peripherals
+* Accelerators
+* Software (see below)
+
+== Event structure
+
+An event is the pair:
+
+[source]
+----
+event_id   : XLEN bits
+event_data : XLEN bits
+----
+
+Both fields are `XLEN` wide (32 bits under RV32E), giving a uniform,
+unpacked FIFO entry shape.
+
+[NOTE]
+.Non-normative
+====
+Whether multiple physical occurrences from a single source are
+coalesced into one logical event before reaching the Event Fabric is
+the responsibility of that source's _event dispatcher_ (e.g. a
+peripheral controller), not of `Xhctx` itself. The Event Fabric and
+the per-hart FIFOs (xref:software-events.adoc[Chapter 5]) treat every
+`event_id`+`event_data` pair they receive as an opaque, atomic unit.
+====
+
+== Routing
+
+The Event Router implements:
+
+[source]
+----
+event_id → context_id
+----
+
+The routing table is configurable by privileged firmware. Routing is
+*uniform*: every event, hardware- or software-sourced, is routed
+through this single mechanism -- there is no exception.
+
+A reserved identity-routed range, `SW_TARGET_BASE + ctx_id`, lets
+software address an arbitrary destination hart
+(xref:software-events.adoc[Section 5.1]) without breaking that
+uniformity. This range is also the mechanism used to initialize harts
+at boot (xref:context-lifecycle.adoc[Section 7.4]).
+
+A second reserved identity-routed range, `ECALL_BASE + ctx_id`, holds
+the *per-hart, firmware-configured* destination for that hart's
+U-mode `ecall` requests (xref:context-lifecycle.adoc[Section 7.2, Case
+E]). Unlike `SW_TARGET_BASE`, which any M-mode hart can address
+arbitrarily by choosing what to write to `mevent`, a U-mode hart never
+chooses its `ECALL_BASE` entry itself -- it is fixed by whichever
+target privileged firmware configured for that `ctx_id`, and reached
+only by executing `ecall`, not by a CSR write U-mode cannot perform.

@@ -1,0 +1,20 @@
+[.space-below]
+image::{cover-logo}[id="riscvlogo",role="xs",alt="RISCV"]
+
+[.space-below]
+== The "Xhctx" Hart-Context Extension
+
+ifndef::doc-mode[]
+Version {page-revnumber}, {page-revdate}: {page-phase-display}
+endif::doc-mode[]
+ifdef::doc-mode[]
+Version {page-revnumber}, {page-revdate}
+endif::doc-mode[]
+
+ifndef::doc-mode[]
+[NOTE]
+.This document is in the {page-phase-display} state
+====
+{page-phase-notice}
+====
+endif::doc-mode[]

@@ -1,0 +1,50 @@
+[#exception-delivery]
+= Exception Delivery
+
+Synchronous exceptions are delivered as events to a dedicated,
+implementation-defined exception hart -- never through the standard
+`mtvec` vector, and never locally to the faulting hart.
+
+*Case D -- synchronous exception.*
+
+[source]
+----
+1. the faulting hart is force-abandoned (hardware trigger, not a
+   mctxctl write)
+2. hardware writes mepc[ctx_id] and mcause[ctx_id] of the faulting
+   hart
+3. one entry is pushed to the exception hart's FIFO, with
+   event_data = mectx (the id of the faulting hart)
+4. the handler reads mectx from its consumed event, then indexes
+   mepc[mectx] / mcause[mectx] for the fault detail
+----
+
+The cross-hart read of `mepc[ctx_id]`/`mcause[ctx_id]` is justified in
+xref:csrs.adoc[Section 3.2].
+
+== Recovery is not architecturally defined
+
+A faulting hart's live PC is left frozen at the faulting instruction.
+There is no mechanism -- no writable resume-PC register, no `mret`-like
+instruction -- by which the exception hart or anything else can redirect
+where that hart resumes. Consequently, **a faulted hart is not
+automatically resumable**: dispatching it again would simply re-execute
+the instruction that faulted.
+
+This is a deliberate choice, not an oversight. Recovery policy is left
+entirely to firmware/system integration, outside this specification:
+
+* the simplest and default-safe policy is to treat a faulted hart as
+  permanently suspended -- firmware simply never targets its `ctx_id`
+  again;
+* any stronger recovery (restarting that hart's actor from a known-good
+  entry point, or a full system reset) requires firmware-level
+  convention and is out of scope here.
+
+Adding a hardware primitive to redirect a suspended hart's resume point
+was considered and rejected: it would only serve this one case, and the
+same reasoning that keeps `mret` out of this model (see
+xref:compatibility.adoc[Chapter 10]) applies here too -- no operation in
+`Xhctx` restores a precisely-suspended computation and continues it.
+Every reactivation, exception recovery included, is a fresh dispatch
+driven by an event, never a resume.

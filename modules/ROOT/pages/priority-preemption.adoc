@@ -1,0 +1,65 @@
+[#priority-preemption]
+= Priority and Preemption
+
+== Fixed priority
+
+[source]
+----
+priority = context_id
+C15 > C14 > ... > C1 > C0
+----
+
+The next hart is obtained from the `!empty` signal of each FIFO
+through a priority encoder generating `next_ctx`. No programmable
+scheduler exists.
+
+== Fully preemptive arbitration
+
+`Xhctx` is *not cooperative*. Fixed priority is evaluated continuously,
+not only at voluntary abandonment:
+
+* When an incoming event's destination hart has *higher* priority than
+  `active_ctx`, it preempts immediately, using the same zero-bubble
+  squash-and-redirect path used for voluntary abandonment
+  (xref:hart-model.adoc[Section 2.5], xref:microarchitecture.adoc[Chapter 11]).
+* When it has *equal or lower* priority, it is enqueued
+  (xref:software-events.adoc[Section 5.2]).
+* `mctxctl` (xref:context-lifecycle.adoc[Chapter 7]) remains available
+  as an independent trigger of the same redirect path.
+
+This preemption may be paused with `mstatus.MIE = 0`
+(xref:csrs.adoc[Section 3.8]).
+
+== Precise preemption boundary
+
+Multi-cycle operations (pending loads, multi-cycle ALU operations) are
+never preempted mid-flight: while the pipeline is stalled, no fetch
+slot is free for another hart, so preemption is naturally deferred to
+the next instruction boundary. This yields precise-interrupt-boundary
+behavior with no additional hardware.
+
+Instruction and data memory ports are physically separate. The I-port
+is driven only by the incoming hart's fetch stage; the D-port only by
+the outgoing hart's still-draining EX/WB memory operation. Because only
+one hart is ever in the pipeline at a time, these accesses safely
+overlap during a switch, and no memory transaction is ever left
+half-complete by a preemption.
+
+== Timer/watchdog preemption is non-maskable
+
+A timer- or watchdog-sourced event targeting the active hart is not a
+special hardware path in terms of routing -- it is an ordinary event,
+subject to the priority rule above like any other. It *is* the sole
+exception to xref:csrs.adoc[Section 3.8]: it is not maskable by
+`mstatus.MIE`, analogous to an NMI in standard RISC-V. Without this
+exception, a hart could clear `MIE` permanently and defeat the
+anti-livelock guarantee this mechanism exists to provide.
+
+== Fairness trade-off
+
+`Xhctx` is, in effect, a fixed-priority preemptive scheduler
+implemented entirely in hardware (consistent with Principle 6,
+xref:intro.adoc[Chapter 1]). As with any such scheme, *`C0` has no
+forward-progress guarantee* under sustained higher-priority load. This
+is an accepted trade-off, stated explicitly rather than implied away
+by the word "deterministic."

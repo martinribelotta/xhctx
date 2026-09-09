@@ -1,0 +1,23 @@
+[#programmers-model]
+= Programmer's Model
+
+Each hart is implemented as a persistent actor. Conceptual example:
+
+[source,c]
+----
+void audio_context(void)
+{
+    while (1) {
+        process_audio(meventdata);
+
+        abandon_context();
+    }
+}
+----
+
+None of the following exist under `Xhctx`:
+
+* ISRs
+* A software scheduler
+* Software-managed context switching
+* `mret`

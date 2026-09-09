@@ -1,0 +1,7 @@
+[#contributors]
+= Contributors
+
+This specification has been contributed to directly or indirectly by:
+
+[%hardbreaks]
+* Martin Ribelotta <martinribelotta@gmail.com>

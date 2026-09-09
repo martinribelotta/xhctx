@@ -1,0 +1,88 @@
+= The "Xhctx" Hart-Context Extension
+Authors: Martin Ribelotta
+include::../docs-resources/global-config.adoc[]
+ifndef::revnumber[:revnumber: v0.0]
+ifndef::revdate[:revdate: 1/2026]
+ifndef::doc-mode[]
+ifndef::phase[:phase: draft-and-development]
+ifndef::phase_display[:phase_display: {phase}]
+ifndef::phase_notice[:phase_notice: Assume everything is subject to change. At this stage, ideas, structures, and content are still evolving. Feedback and iteration are encouraged as nothing is final, and adjustments may be frequent.]
+ifndef::revremark[:revremark: This document is under development and is not endorsed by RISC-V International.]
+ifndef::milestone_id[:milestone_id: {phase}]
+endif::doc-mode[]
+ifndef::spec_short[:spec_short: Xhctx]
+:docgroup: Independent / experimental proposal
+:description: The "Xhctx" Hart-Context Extension
+:revinfo:
+:preface-title: Preamble
+:colophon:
+:appendix-caption: Appendix
+:imagesdir: ../docs-resources/images
+:title-logo-image: image:risc-v_logo.png["RISC-V International Logo",pdfwidth=3.25in,align=center]
+:experimental:
+:reproducible:
+:imagesoutdir: images
+:bibtex-file: modules/ROOT/resources/riscv-spec.bib
+:bibtex-order: alphabetical
+:bibtex-style: apa
+:icons: font
+:lang: en
+:listing-caption: Listing
+:sectnums:
+:toc: macro
+:toclevels: 4
+:toc-title: Table of Contents
+:source-highlighter: pygments
+ifdef::backend-pdf[]
+:source-highlighter: coderay
+endif::[]
+:data-uri:
+:hide-uri-scheme:
+:stem: latexmath
+:footnote:
+:xrefstyle: short
+
+ifndef::doc-mode[]
+[preface]
+== Document State
+*Note:* {phase_notice}
+endif::doc-mode[]
+
+toc::[]
+
+[preface]
+== List of figures
+list-of::image[hide_empty_section=true, enhanced_rendering=true]
+
+[preface]
+== List of tables
+list-of::table[hide_empty_section=true, enhanced_rendering=true]
+
+[preface]
+== List of listings
+list-of::listing[hide_empty_section=true, enhanced_rendering=true]
+
+[preface]
+include::../modules/ROOT/pages/copyright.adoc[leveloffset=+1]
+
+[preface]
+include::../modules/ROOT/pages/contributors.adoc[leveloffset=+1]
+
+include::../modules/ROOT/pages/intro.adoc[leveloffset=+1]
+include::../modules/ROOT/pages/hart-model.adoc[leveloffset=+1]
+include::../modules/ROOT/pages/csrs.adoc[leveloffset=+1]
+include::../modules/ROOT/pages/event-fabric.adoc[leveloffset=+1]
+include::../modules/ROOT/pages/software-events.adoc[leveloffset=+1]
+include::../modules/ROOT/pages/priority-preemption.adoc[leveloffset=+1]
+include::../modules/ROOT/pages/context-lifecycle.adoc[leveloffset=+1]
+include::../modules/ROOT/pages/exception-delivery.adoc[leveloffset=+1]
+include::../modules/ROOT/pages/programmers-model.adoc[leveloffset=+1]
+include::../modules/ROOT/pages/compatibility.adoc[leveloffset=+1]
+include::../modules/ROOT/pages/microarchitecture.adoc[leveloffset=+1]
+include::../modules/ROOT/pages/open-issues.adoc[leveloffset=+1]
+include::../modules/ROOT/pages/rationale.adoc[leveloffset=+1]
+
+[index]
+== Index
+
+include::../modules/ROOT/pages/bibliography.adoc[leveloffset=+1]

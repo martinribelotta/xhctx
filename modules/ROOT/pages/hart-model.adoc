@@ -1,0 +1,77 @@
+[#hart-model]
+= The Xhctx Hart Model
+
+== Harts, not a new concept
+
+Each `Xhctx` context is architecturally a RISC-V *hart*: it has its
+own PC, its own register file, its own `mhartid`, and its own
+`mepc`/`mcause` (xref:csrs.adoc[Chapter 3]). This lets `Xhctx` reuse
+the existing RISC-V multi-hart model -- hart numbering, per-hart CSR
+state, the multi-hart Debug Specification
+(xref:microarchitecture.adoc[Chapter 11]) -- instead of introducing a
+new architectural concept.
+
+`Xhctx` deviates from a standard hart in one deliberate way: *`mret`
+does not exist as a control-transfer mechanism in this model*
+(Principle 3, xref:intro.adoc[Chapter 1]). A hart never returns from
+an exception locally. Control is always yielded through `mctxctl`
+(xref:context-lifecycle.adoc[Chapter 7]), and a synchronous exception
+is not delivered through a local `mtvec` vector but through the event
+mechanism (xref:exception-delivery.adoc[Chapter 8], Case D). Everything
+else of the standard hart model is preserved.
+
+== Preemptible, resumable harts
+
+Unlike a conventional RISC-V multi-hart system -- where harts are
+assumed to be physically independent, each with its own execution
+resource -- the `N` harts of an `Xhctx` implementation share a single
+physical execution pipeline. Hart dispatch and preemption
+(xref:priority-preemption.adoc[Chapter 6]) are performed by hardware,
+not by software and not by physical independence.
+
+== Reference parameter set
+
+.Reference parameter set
+[cols="1,1", options="header"]
+|===
+| Parameter | Reference value
+| Base ISA | RV32E
+| Pipeline depth | 3 stages
+| Number of harts | 16
+| `ctx_id` width | 4 bits
+|===
+
+== Per-hart architectural state
+
+Each hart owns an independent bank of:
+
+* Program Counter
+* Register file (`x0`--`x15` under RV32E)
+* Pipeline registers (IF/ID, ID/EX, EX/WB) and pipeline control state
+* `mepc`, `mcause` (xref:csrs.adoc[Chapter 3])
+* `mstatus.MIE` (xref:priority-preemption.adoc[Chapter 6])
+
+All of the above is fully banked, one instance per hart. No hart's
+copy is ever overwritten by another hart's activity.
+
+== The active-hart selector
+
+The processor maintains one piece of global, non-architectural state:
+
+[source]
+----
+active_ctx : 4 bits
+----
+
+A hart switch is conceptually:
+
+[source]
+----
+active_ctx ← new_ctx
+----
+
+No register copy and no pipeline reconstruction occurs. `active_ctx`
+is not itself an architectural CSR; a hart reads "which hart am I"
+through `mhartid` (xref:csrs.adoc[Section 3.1]), which is trivially
+always its own identity, since only the hart holding `active_ctx` can
+execute the instruction that reads it.

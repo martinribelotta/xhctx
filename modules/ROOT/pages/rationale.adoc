@@ -1,0 +1,22 @@
+[#rationale]
+= Rationale and Comparison with Prior Art
+
+[NOTE]
+.Non-normative
+====
+This entire chapter is non-normative reference material; it imposes no
+conformance requirements.
+====
+
+_To be expanded._ Points to cover in a future revision:
+
+* vs. classical trap/ISR + RTOS scheduling (register save/restore cost,
+  ISR latency jitter).
+* vs. SMT/fine-grained-multithreaded cores (`Xhctx` dispatches at most
+  one hart per cycle; it is not simultaneous multithreading).
+* vs. the RISC-V Hypervisor extension's shadow-state precedent
+  (xref:csrs.adoc[Section 3.2]), which motivates the cross-hart read
+  window.
+* vs. vectored/nested interrupt controllers (PLIC/CLIC) with
+  priority-based preemption, which share the fairness trade-off of
+  xref:priority-preemption.adoc[Section 6.5].

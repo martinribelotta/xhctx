@@ -1,0 +1,61 @@
+[#intro]
+= Introduction and Motivation
+
+[NOTE]
+.Status
+====
+This is a first-draft, non-ratified specification of an experimental
+RISC-V extension. It is not endorsed by RISC-V International. All CSR
+addresses are placeholders pending allocation from the appropriate
+custom/reserved range (see xref:csrs.adoc[Chapter 3], Section 3.0).
+Sections marked _(Non-normative)_ are explanatory and impose no
+conformance requirements.
+====
+
+== Overview
+
+`Xhctx` ("Hart Context") replaces the classical interrupt model --
+
+[source]
+----
+Event → Trap → ISR → mret
+----
+
+-- with a model in which events activate *persistent execution
+contexts* that behave architecturally as RISC-V harts:
+
+[source]
+----
+Event → Event Fabric → Persistent context → Abandonment → Next context
+----
+
+The unit of scheduling ceases to be the interrupt and becomes the
+*hart*. Hart selection is performed entirely by hardware; no
+programmable scheduler exists.
+
+== Goals
+
+An `Xhctx`-compliant implementation SHALL provide:
+
+* Deterministic, minimal-latency hart activation.
+* Zero software-managed register save/restore across hart switches.
+* No ISR prologue/epilogue.
+* No use of `mret` as a control-transfer mechanism.
+* Hart state resident entirely in hardware.
+* A hardware-arbitrated Event Fabric with fixed-priority arbitration.
+* A viable implementation on a small RV32E core.
+
+== Design Principles
+
+. Harts are persistent: they are never created or destroyed during
+  operation.
+. Events activate harts; no ephemeral ISRs exist.
+. Software never writes the currently active hart selector directly.
+. All execution state is fully banked, one copy per hart.
+. A hart switch consists solely of selecting a different bank.
+. Hart selection is arbitrated entirely by hardware; no RTOS-style
+  programmable scheduler exists.
+. Behavior is deterministic and formally verifiable, modulo the
+  documented trade-offs in xref:priority-preemption.adoc[Chapter 6].
+. The ISA remains compatible with RV32E wherever possible
+  (xref:compatibility.adoc[Chapter 10]).

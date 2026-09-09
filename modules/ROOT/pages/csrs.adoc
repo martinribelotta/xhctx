@@ -1,0 +1,228 @@
+[#csrs]
+= Control and Status Registers
+
+== Privilege binding and CSR address allocation
+
+RISC-V custom CSR address ranges are privilege-level-specific -- the
+target privilege level is encoded in address bits `[9:8]`, so "M-mode
+or S-mode" cannot mean simultaneous access to the same address from
+either level. This draft defines the *M-mode-resident binding*,
+matching the small RV32E microcontroller target of
+xref:hart-model.adoc[Chapter 2], where S-mode is not expected to be
+present. An S-mode-resident binding (for an OS-hosted or
+hypervisor-aware use case) would require a separate allocation from
+the supervisor custom ranges below and is out of scope for this draft.
+
+.RISC-V custom CSR address ranges
+[cols="1,1,1", options="header"]
+|===
+| Range | Access | Level
+| `0x7C0`--`0x7FF`, `0xBC0`--`0xBFF` | Custom R/W | Machine
+| `0xFC0`--`0xFFF` | Custom RO | Machine
+| `0x5C0`--`0x5FF`, `0x9C0`--`0x9FF` | Custom R/W | Supervisor
+| `0xDC0`--`0xDFF` | Custom RO | Supervisor
+|===
+
+`Xhctx` allocates its three directly-addressed CSRs from the Machine
+custom R/W range:
+
+.Xhctx direct CSR addresses (draft)
+[cols="1,1", options="header"]
+|===
+| CSR | Address (draft)
+| `mctxctl` | `0x7C0`
+| `mevent` | `0x7C1`
+| `meventdata` | `0x7C2`
+|===
+
+These are placeholder addresses within a legitimate custom range,
+pending review; they are not yet allocated by RISC-V International.
+
+None of the three CSRs above are accessible from U-mode -- this
+follows from address bits `[9:8] = 11`, which restricts access to
+M-mode by the standard CSR privilege check, with no additional gating
+required.
+
+== `mhartid` (reused, RO)
+
+No separate `mctx` CSR exists. The identity of "the hart currently
+executing" is, tautologically, the reader's own `mhartid` -- a hart
+that is not currently dispatched cannot execute a CSR read at all.
+`mhartid` therefore serves this role without new architectural state.
+
+== Cross-hart read window: `meventdata[ctx_id]`, `mepc[ctx_id]`, `mcause[ctx_id]`
+
+These three registers are *read-only for any `ctx_id`*, not only the
+reader's own. This is a deliberate departure from the strict per-hart
+CSR isolation assumed elsewhere in RISC-V.
+
+[NOTE]
+.Non-normative
+====
+This is not unprecedented: the RISC-V Hypervisor extension already
+lets HS-mode read and write VS-mode's shadowed architectural state
+(`vsepc`, `vscause`, etc.). `Xhctx` applies the same principle:
+tightly-coupled harts sharing one execution resource may expose a
+controlled introspection window into each other's state without
+ceasing to be independent harts in every other respect.
+====
+
+*`Xhctx` REQUIRES the `Smcsrind` extension* (ratified 2024) to
+implement this window, rather than allocating one raw CSR address per
+`(array, ctx_id)` pair -- 48 addresses would consume most of the
+Machine custom RO range on its own. `Smcsrind` was designed for
+exactly this problem: accessing an array of registers by index through
+a `miselect`/`mireg` pair (standard addresses `0x350`/`0x351`) instead
+of a dedicated address per element. Values of `miselect` with the
+most-significant bit set are reserved for custom use, which is the
+sub-range `Xhctx` uses.
+
+Draft encoding (bit layout non-final, pending confirmation of the
+implemented `miselect` width):
+
+[source]
+----
+miselect = CUSTOM_BIT | (array_sel[1:0] << 4) | ctx_id[3:0]
+
+array_sel = 00  → meventdata[ctx_id]
+array_sel = 01  → mepc[ctx_id]
+array_sel = 10  → mcause[ctx_id]
+----
+
+After writing `miselect`, reading `mireg` returns the selected value.
+Since all three arrays are read-only, a write to `mireg` while one of
+these values is selected is *reserved* and SHOULD raise an illegal
+instruction exception, consistent with the array being read-only.
+
+An `Xhctx` implementation therefore also declares a dependency on
+`Smcsrind` in its ISA string, e.g.:
+
+[source]
+----
+RV32E_Smcsrind_Xhctx
+----
+
+(standard extensions are listed before non-standard ones, per the
+RISC-V ISA extension naming conventions.)
+
+== `mevent` (RO/WO)
+
+* *Read:* the `event_id` that activated the currently executing hart.
+* *Write:* specifies the destination `event_id` -- either from the
+  general routing table or from the `SW_TARGET_BASE` identity range
+  (xref:event-fabric.adoc[Section 4.3]) -- and triggers a FIFO push,
+  subject to the bypass/priority rule of
+  xref:priority-preemption.adoc[Chapter 6].
+
+== `meventdata` (RO/WO, banked)
+
+* *Direct write, address `0x7C2`* -- the only writable form. It always
+  implicitly addresses the banked slot of the _currently executing_
+  hart; no instruction exists that can write another hart's slot.
+* *Indexed read via `Smcsrind`*, `meventdata[ctx_id]` -- read-only,
+  for any `ctx_id` (see above).
+
+Because unindexed writes can only ever target the writer's own slot,
+the two-instruction emit sequence (`meventdata` then `mevent`,
+xref:software-events.adoc[Chapter 5]) is safe under full preemption:
+no other hart can ever corrupt a slot it has no way to address, so a
+hart resuming after being preempted mid-sequence always finds its own
+staged payload intact.
+
+== `mctxctl` (WO)
+
+Control register used to voluntarily abandon the current hart
+(xref:context-lifecycle.adoc[Chapter 7]).
+
+== `mepc[ctx_id]` (RO, banked)
+
+One register per hart, holding the faulting PC of that hart. Written
+only by hardware, at the moment a hart is force-abandoned due to a
+synchronous exception (xref:exception-delivery.adoc[Chapter 8]). This
+is a dedicated register, not an alias of the live architectural PC
+bank -- aliasing would allow a race in which the faulting hart is
+reactivated by an unrelated event before the exception handler reads
+its frozen fault state.
+
+== `mcause[ctx_id]` (RO, banked)
+
+One register per hart, holding the cause code of that hart's most
+recent synchronous exception. Same write semantics as `mepc[ctx_id]`.
+
+== `mstatus.MIE` -- preemption pause
+
+The standard, per-hart `MIE` bit of `mstatus` is reused, unmodified in
+its storage, to let a hart protect a short read-modify-write sequence
+against a peripheral shared with another hart
+(xref:priority-preemption.adoc[Chapter 6]) -- a hazard that banked
+architectural state does not cover, since the state at risk lives
+outside any hart, in the device. While `MIE = 0`, priority-based
+preemption (xref:priority-preemption.adoc[Chapter 6]) does not evict
+the active hart.
+
+`MIE = 0` does *not* mask timer/watchdog-forced preemption
+(xref:priority-preemption.adoc[Section 6.4]); if it did, a hart could
+disable preemption permanently and reintroduce the livelock that
+mechanism exists to prevent.
+
+== CSR summary
+
+.CSR summary
+[cols="1,1,1,1,2", options="header"]
+|===
+| CSR | Address | Access | Banked | Notes
+
+| `mhartid`
+| standard
+| RO
+| yes
+| Standard RISC-V CSR, reused
+
+| `mctxctl`
+| `0x7C0`
+| WO
+| n/a
+| Voluntary abandonment
+
+| `mevent`
+| `0x7C1`
+| RO/WO
+| no
+| Trigger + last-activating event_id
+
+| `meventdata`
+| `0x7C2`
+| WO
+| yes
+| Self-only write
+
+| `miselect`/`mireg`
+| `0x350`/`0x351` (`Smcsrind`)
+| --
+| --
+| Indirect access, dependency
+
+| `meventdata[ctx_id]`
+| via `Smcsrind`
+| RO
+| yes
+| Cross-hart introspection
+
+| `mepc[ctx_id]`
+| via `Smcsrind`
+| RO
+| yes
+| Cross-hart introspection
+
+| `mcause[ctx_id]`
+| via `Smcsrind`
+| RO
+| yes
+| Cross-hart introspection
+
+| `mstatus.MIE`
+| standard
+| RW
+| yes
+| Standard CSR, reused for preemption pause
+|===

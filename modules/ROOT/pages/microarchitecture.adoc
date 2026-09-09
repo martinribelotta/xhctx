@@ -1,0 +1,43 @@
+[#microarchitecture]
+= Reference Microarchitecture
+
+[NOTE]
+.Non-normative
+====
+This entire chapter is non-normative reference material; it imposes no
+conformance requirements.
+====
+
+Target RTL:
+
+* RV32E, 3-stage pipeline, 16 harts
+* Fully banked register file and pipeline state
+* 16 FIFOs
+* Priority encoder
+* Mandatory event bypass
+* One-cycle target hart activation
+* `ctx_id` tag propagated through IF/ID, ID/EX, EX/WB
+* `mepc[ctx_id]` / `mcause[ctx_id]` banks
+* Per-hart mask bit feeding the priority encoder (debug support)
+* Each hart exposed as an independent hart to the standard RISC-V
+  Debug Module, reusing its existing multi-hart infrastructure
+
+== Pipeline tagging and the zero-bubble switch
+
+Only the WB stage writes the register file, and register reads are
+addressed directly by `{ctx_id, reg_num}`, so no read or write port
+ever conflicts between harts. `ctx_id` must nonetheless travel with the
+instruction through every pipeline register (IF/ID, ID/EX, EX/WB),
+because `active_ctx` may already point to the new hart by the time an
+older instruction retires in WB; without a per-stage tag, WB could
+write into the wrong hart's bank.
+
+A hart switch (voluntary via `mctxctl`, or forced by arbitration) is a
+standard squash-and-redirect, identical in cost to a jump resolved in a
+single cycle: the instruction already fetched behind the triggering
+instruction is squashed, the outgoing hart's banked PC is frozen at the
+correct resume point without that squashed instruction executing, and
+the incoming hart's fetch begins the very next cycle. This requires
+`mctxctl` (and any hardware-forced switch condition) to resolve within
+a single pipeline stage. Under that constraint, hart activation is
+*one cycle, no bubble* -- not a stall-based drain.
