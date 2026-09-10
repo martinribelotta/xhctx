@@ -12,7 +12,6 @@ name: Publish site to GitHub Pages
 on:
   push:
     branches: [master]
-    tags: ["v*"]
   workflow_dispatch:
 
 permissions:
