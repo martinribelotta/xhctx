@@ -1,0 +1,56 @@
+name: Build specification
+
+# Builds the Xhctx spec PDF/HTML on every push and PR (as a downloadable CI
+# artifact), and additionally publishes a GitHub Release with the PDF attached
+# whenever a `v*` tag is pushed. This is a deliberately simplified adaptation
+# of riscv/docs-spec-template's build-pdf.yml: this repo is an individual
+# experimental proposal, not part of RISC-V International's own multi-repo
+# ARC governance, so the upstream template's version-bot/milestone-gate/
+# site-stamping machinery (built for that governance flow) is left out.
+
+on:
+  push:
+    branches: [master]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Build PDF and HTML
+        run: |
+          set -euo pipefail
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            make VERSION="${{ github.ref_name }}" build
+          else
+            make build
+          fi
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: xhctx-spec
+          path: |
+            build/*.pdf
+            build/*.html
+          retention-days: 30
+
+      - name: Create GitHub Release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build/*.pdf
+          name: Release ${{ github.ref_name }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
