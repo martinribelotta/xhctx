@@ -8,15 +8,106 @@ This entire chapter is non-normative reference material; it imposes no
 conformance requirements.
 ====
 
-_To be expanded._ Points to cover in a future revision:
+== vs. classical trap/ISR + RTOS scheduling
 
-* vs. classical trap/ISR + RTOS scheduling (register save/restore cost,
-  ISR latency jitter).
-* vs. SMT/fine-grained-multithreaded cores (`Xhctx` dispatches at most
-  one hart per cycle; it is not simultaneous multithreading).
-* vs. the RISC-V Hypervisor extension's shadow-state precedent
-  (xref:csrs.adoc[Section 3.2]), which motivates the cross-hart read
-  window.
-* vs. vectored/nested interrupt controllers (PLIC/CLIC) with
-  priority-based preemption, which share the fairness trade-off of
-  xref:priority-preemption.adoc[Section 6.5].
+The classical model pays two layered costs. First, the trap itself:
+entry saves `mepc`/`mstatus` in hardware, but the ISR still has a
+software prologue/epilogue to save and restore whatever general
+registers it clobbers, and exit is `mret`. Second, if an RTOS sits on
+top, every scheduling decision adds a further software context switch
+-- saving a full register set to a per-task stack, running scheduler
+logic, restoring another task's set -- plus whatever priority-inversion
+avoidance protocol the RTOS implements to keep a high-priority task
+from being blocked behind a low-priority one holding a shared resource.
+
+`Xhctx` collapses both layers into one hardware mechanism: hart state
+is already banked, so a switch is selecting a different bank, not
+copying registers to and from a stack
+(xref:hart-model.adoc[Chapter 2]). There is no ISR prologue/epilogue
+and no software scheduler (xref:priority-preemption.adoc[Chapter 6]).
+The trade-off is real, not free: an RTOS's dynamic priority policies
+(round-robin, priority inheritance/ceiling protocols) are given up for
+a fixed hardware priority scheme, with the documented consequence that
+`C0` has no forward-progress guarantee under sustained load
+(xref:priority-preemption.adoc[Section 6.5]). `Xhctx` trades scheduling
+flexibility for the elimination of switching cost, not the other way
+around.
+
+== vs. SMT / fine-grained multithreaded cores
+
+Simultaneous multithreading genuinely interleaves instructions from
+multiple hardware threads, filling pipeline bubbles left by one thread
+with ready instructions from another, to improve throughput. `Xhctx`
+does not do this: only one hart is ever in the pipeline at a time
+(xref:priority-preemption.adoc[Section 6.3]); banking exists to make
+*switching* between harts free, not to execute more than one hart's
+instructions concurrently. `Xhctx` is closer to hardware-scheduled,
+zero-cost time-multiplexing of a single pipeline than to SMT -- it
+removes switching overhead, but does not extract additional
+instruction-level parallelism across harts the way SMT does.
+
+A closer relative in spirit, at smaller scale, is prior work on
+hardware-assisted fast interrupt and context-switch support for RISC-V
+microcontrollers built on top of CLIC (e.g. CV32RT
+cite:[cv32rt-arxiv2023], which adds a custom fast-interrupt extension
+alongside CLIC to cut interrupt latency and task context-switch cost).
+`Xhctx` shares the goal -- eliminate register save/restore cost -- but
+generalizes the mechanism from "accelerate the trap/context-switch
+path" to "there is no trap/context-switch path to accelerate": every
+hart's complete architectural state is its own permanent bank, and the
+underlying trap/`mret` model is replaced rather than sped up.
+
+== vs. the RISC-V Hypervisor extension's shadow-state precedent
+
+xref:csrs.adoc[Section 3.2] justifies `Xhctx`'s cross-hart read window
+(`mepc[ctx_id]`, `mcause[ctx_id]`, `meventdata[ctx_id]`) by analogy
+with HS-mode reading and writing VS-mode's shadowed architectural state
+(`vsepc`, `vscause`, and friends) in the Hypervisor extension. The
+structural pattern is the same in both: a privileged context has a
+controlled window into another context's normally-private state,
+without that other context ceasing to be architecturally independent
+in every other respect.
+
+The purpose differs, though. The H-extension's shadow state exists so
+a hypervisor can trap-and-emulate a guest's view of privileged state
+while the guest otherwise runs natively -- the guest still has its own
+conventional trap/`mret` flow, just intercepted. `Xhctx`'s cross-hart
+window exists because there is no trap/`mret` flow to intercept in the
+first place: the shadowed registers are the *only* record of what
+happened to a hart that was forced to abandon, read by a cooperating
+peer hart (the exception hart) rather than by a virtualizing layer
+above it.
+
+== vs. vectored/nested interrupt controllers (PLIC/CLIC)
+
+The Platform-Level Interrupt Controller (PLIC) routes external
+interrupt sources to harts with software-assigned priorities and
+per-hart claim/complete semantics -- similar in spirit to `Xhctx`'s
+Event Fabric and priority encoder
+(xref:priority-preemption.adoc[Chapter 6]), in that both move the
+"which hart handles this" decision into shared hardware rather than
+software.
+
+The Core-Local Interrupt Controller (CLIC) is the closer comparison,
+since it targets the same low-latency goal as `Xhctx`: it adds
+per-interrupt priority levels, selective hardware vectoring straight
+to a handler address, and non-nested tail-chaining (via the `mnxti`
+CSR) precisely to cut ISR entry/exit overhead. But CLIC optimizes the
+*constants* of the classical model without removing the model itself:
+entry is still a trap, exit is still `mret`, and the register file
+outside whatever CLIC auto-saves is still the software prologue's
+responsibility. `Xhctx` removes the model: there is no vector-to-a-PC
+step, because there is no shared code address to vector to -- the
+Event Fabric's routing table (xref:event-fabric.adoc[Section 4.3])
+plays the structural role of CLIC's interrupt vector table, but its
+entries are *hart identities*, not code addresses. Dispatching an event
+does not jump to a handler within the current hart's memory map; it
+switches which hart's independent, already-resident state is active.
+
+Both share the same underlying trade-off, though: fixed or
+software-configured priority with preemption of a running handler by a
+higher-priority one is, in either design, a scheme where the
+lowest-priority handler has no forward-progress guarantee under
+sustained load (xref:priority-preemption.adoc[Section 6.5]). `Xhctx`
+does not avoid this trade-off -- it inherits it from the same family of
+designs and states it explicitly rather than as an emergent surprise.
