@@ -2,19 +2,19 @@
 = Open Issues
 
 * *CSR address numbering* -- draft addresses assigned within the
-  legitimate Machine custom R/W range (xref:csrs.adoc[Section 3.0]);
+  legitimate Machine custom R/W range (xref:csrs.adoc[Section 3.1]);
   not yet reviewed or allocated by RISC-V International.
 * *`miselect` bit layout for the `Smcsrind` window*
-  (xref:csrs.adoc[Section 3.2]) -- the `array_sel`/`ctx_id` encoding is
+  (xref:csrs.adoc[Section 3.3]) -- the `array_sel`/`ctx_id` encoding is
   illustrative; needs confirmation against the implemented `miselect`
   width and against any other custom extensions expected to share the
   same core's custom `miselect` sub-range.
 * *S-mode-resident binding* -- out of scope for this draft
-  (xref:csrs.adoc[Section 3.0]); would need its own address allocation
+  (xref:csrs.adoc[Section 3.1]); would need its own address allocation
   from the supervisor custom ranges and possibly `Sscsrind` instead of
   `Smcsrind`.
 * *Access-control granularity* -- M-mode-only is decided for the
-  reference binding (xref:csrs.adoc[Section 3.0]); finer-grained
+  reference binding (xref:csrs.adoc[Section 3.1]); finer-grained
   control (e.g. per-source restrictions on the `SW_TARGET_BASE` range)
   is not yet specified.
 * *`ecall` from S-mode* -- left undefined, tracking the general

@@ -23,12 +23,12 @@ not only at voluntary abandonment:
   squash-and-redirect path used for voluntary abandonment
   (xref:hart-model.adoc[Section 2.5], xref:microarchitecture.adoc[Chapter 11]).
 * When it has *equal or lower* priority, it is enqueued
-  (xref:software-events.adoc[Section 5.2]).
+  (xref:software-events.adoc[Section 5.3]).
 * `mctxctl` (xref:context-lifecycle.adoc[Chapter 7]) remains available
   as an independent trigger of the same redirect path.
 
 This preemption may be paused with `mstatus.MIE = 0`
-(xref:csrs.adoc[Section 3.8]).
+(xref:csrs.adoc[Section 3.9]).
 
 == Precise preemption boundary
 
@@ -50,7 +50,7 @@ half-complete by a preemption.
 A timer- or watchdog-sourced event targeting the active hart is not a
 special hardware path in terms of routing -- it is an ordinary event,
 subject to the priority rule above like any other. It *is* the sole
-exception to xref:csrs.adoc[Section 3.8]: it is not maskable by
+exception to xref:csrs.adoc[Section 3.9]: it is not maskable by
 `mstatus.MIE`, analogous to an NMI in standard RISC-V. Without this
 exception, a hart could clear `MIE` permanently and defeat the
 anti-livelock guarantee this mechanism exists to provide.

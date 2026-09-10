@@ -7,7 +7,7 @@
 This is a first-draft, non-ratified specification of an experimental
 RISC-V extension. It is not endorsed by RISC-V International. All CSR
 addresses are placeholders pending allocation from the appropriate
-custom/reserved range (see xref:csrs.adoc[Chapter 3], Section 3.0).
+custom/reserved range (see xref:csrs.adoc[Chapter 3], Section 3.1).
 Sections marked _(Non-normative)_ are explanatory and impose no
 conformance requirements.
 ====

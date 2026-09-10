@@ -20,7 +20,7 @@ implementation-defined exception hart -- never through the standard
 ----
 
 The cross-hart read of `mepc[ctx_id]`/`mcause[ctx_id]` is justified in
-xref:csrs.adoc[Section 3.2].
+xref:csrs.adoc[Section 3.3].
 
 == Recovery is not architecturally defined
 

@@ -72,6 +72,6 @@ active_ctx ← new_ctx
 
 No register copy and no pipeline reconstruction occurs. `active_ctx`
 is not itself an architectural CSR; a hart reads "which hart am I"
-through `mhartid` (xref:csrs.adoc[Section 3.1]), which is trivially
+through `mhartid` (xref:csrs.adoc[Section 3.2]), which is trivially
 always its own identity, since only the hart holding `active_ctx` can
 execute the instruction that reads it.

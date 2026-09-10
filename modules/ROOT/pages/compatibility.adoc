@@ -8,7 +8,7 @@ independent ISA, and is named `Xhctx` ("Hart Context") per the RISC-V
 followed by an alphanumeric name ending in a letter.
 
 `Xhctx` depends on the standard `Smcsrind` extension
-(xref:csrs.adoc[Section 3.2]). Per the ISA naming conventions, standard
+(xref:csrs.adoc[Section 3.3]). Per the ISA naming conventions, standard
 extensions are listed before non-standard ones, and non-standard
 extensions are ordered alphabetically among themselves and
 underscore-separated from other multi-letter extensions:
@@ -53,7 +53,7 @@ redefined, and only when executed from U-mode.
   loop.
 * *`ecall` from U-mode* is the sole channel by which a U-mode hart can
   reach the Event Fabric at all, since it has no access to `mevent`/
-  `meventdata` (xref:csrs.adoc[Section 3.0]). It triggers Case E
+  `meventdata` (xref:csrs.adoc[Section 3.1]). It triggers Case E
   (xref:context-lifecycle.adoc[Section 7.2]) -- a hardware-forced,
   *resumable* abandonment routed to a per-hart, firmware-configured
   destination, unlike the terminal Case D used for genuine faults.

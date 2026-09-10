@@ -76,7 +76,7 @@ The service hart replies with an *ordinary* software-sourced event
 xref:software-events.adoc[Section 5.1]) -- no new mechanism is needed
 for the reply direction, only for the initial U-mode-to-M-mode request,
 since only that direction is blocked by `mevent`/`meventdata` being
-M-mode-only CSRs (xref:csrs.adoc[Section 3.0]). When that reply
+M-mode-only CSRs (xref:csrs.adoc[Section 3.1]). When that reply
 arrives, the calling hart is reactivated exactly like any other Case
 A/B dispatch, resuming at its own frozen PC -- functionally a return,
 implemented as ordinary event reactivation rather than a dedicated
@@ -90,7 +90,7 @@ general-purpose registers, immune to that hazard.
 already has full access to `mevent`/`meventdata` and has no need for a
 routed request mechanism, so it retains the generic Case D (fault)
 treatment. `ecall` from S-mode is undefined, tracking S-mode's
-out-of-scope status (xref:csrs.adoc[Section 3.0]).
+out-of-scope status (xref:csrs.adoc[Section 3.1]).
 
 == Minimal per-hart lifecycle state
 

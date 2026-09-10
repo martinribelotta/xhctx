@@ -59,7 +59,7 @@ underlying trap/`mret` model is replaced rather than sped up.
 
 == vs. the RISC-V Hypervisor extension's shadow-state precedent
 
-xref:csrs.adoc[Section 3.2] justifies `Xhctx`'s cross-hart read window
+xref:csrs.adoc[Section 3.3] justifies `Xhctx`'s cross-hart read window
 (`mepc[ctx_id]`, `mcause[ctx_id]`, `meventdata[ctx_id]`) by analogy
 with HS-mode reading and writing VS-mode's shadowed architectural state
 (`vsepc`, `vscause`, and friends) in the Hypervisor extension. The
