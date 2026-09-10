@@ -1,0 +1,80 @@
+name: Publish site to GitHub Pages
+
+# Publishes the spec as a browsable, chapter-by-chapter Antora HTML site on
+# this repo's own GitHub Pages, alongside the PDF release (build-pdf.yml).
+# Simplified from riscv/docs-spec-template's publish-site.yml: no Kroki
+# service (this spec has no diagrams to render) and no version-bot
+# integration (not part of RISC-V International's multi-repo governance).
+#
+# One-time setup: a repo admin must set Settings -> Pages -> Source to
+# "GitHub Actions" before the first run succeeds.
+
+on:
+  push:
+    branches: [master]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install Antora tooling
+        run: npm ci
+
+      - name: Configure Pages
+        id: pages
+        uses: actions/configure-pages@v5
+        with:
+          enablement: true
+
+      - name: Resolve release version
+        id: release
+        run: |
+          set -euo pipefail
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            echo "version=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+            echo "date=$(git log -1 --format=%cs "${{ github.ref_name }}")" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=" >> "$GITHUB_OUTPUT"
+            echo "date=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build site
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+          DATE: ${{ steps.release.outputs.date }}
+        run: ./scripts/build-pages-site.sh "${{ steps.pages.outputs.base_url }}"
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: build/pages-site
+
+      - name: Deploy to GitHub Pages
+        id: deploy
+        uses: actions/deploy-pages@v4
