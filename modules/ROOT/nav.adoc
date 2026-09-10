@@ -12,6 +12,7 @@
 ** xref:programmers-model.adoc[Programmer's Model]
 ** xref:compatibility.adoc[RV32E ISA Compatibility]
 ** xref:microarchitecture.adoc[Reference Microarchitecture]
+** xref:debug-support.adoc[Debug Support]
 ** xref:open-issues.adoc[Open Issues]
 ** xref:rationale.adoc[Rationale and Comparison with Prior Art]
 ** xref:bibliography.adoc[Bibliography]

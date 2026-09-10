@@ -79,6 +79,7 @@ include::../modules/ROOT/pages/exception-delivery.adoc[leveloffset=+1]
 include::../modules/ROOT/pages/programmers-model.adoc[leveloffset=+1]
 include::../modules/ROOT/pages/compatibility.adoc[leveloffset=+1]
 include::../modules/ROOT/pages/microarchitecture.adoc[leveloffset=+1]
+include::../modules/ROOT/pages/debug-support.adoc[leveloffset=+1]
 include::../modules/ROOT/pages/open-issues.adoc[leveloffset=+1]
 include::../modules/ROOT/pages/rationale.adoc[leveloffset=+1]
 

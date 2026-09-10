@@ -7,9 +7,9 @@ Each `Xhctx` context is architecturally a RISC-V *hart*: it has its
 own PC, its own register file, its own `mhartid`, and its own
 `mepc`/`mcause` (xref:csrs.adoc[Chapter 3]). This lets `Xhctx` reuse
 the existing RISC-V multi-hart model -- hart numbering, per-hart CSR
-state, the multi-hart Debug Specification
-(xref:microarchitecture.adoc[Chapter 11]) -- instead of introducing a
-new architectural concept.
+state, the multi-hart Debug Specification -- instead of introducing a
+new architectural concept; reconciling that reuse with a single
+shared pipeline is worked out in xref:debug-support.adoc[Chapter 12].
 
 `Xhctx` deviates from a standard hart in one deliberate way: *`mret`
 does not exist as a control-transfer mechanism in this model*

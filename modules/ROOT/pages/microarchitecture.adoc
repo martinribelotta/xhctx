@@ -18,7 +18,8 @@ Target RTL:
 * One-cycle target hart activation
 * `ctx_id` tag propagated through IF/ID, ID/EX, EX/WB
 * `mepc[ctx_id]` / `mcause[ctx_id]` banks
-* Per-hart mask bit feeding the priority encoder (debug support)
+* Per-hart mask bit feeding the priority encoder (debug support,
+  xref:debug-support.adoc[Chapter 12])
 * Each hart exposed as an independent hart to the standard RISC-V
   Debug Module, reusing its existing multi-hart infrastructure
 

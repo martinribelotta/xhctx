@@ -115,8 +115,8 @@ SUSPENDED → ctx != active_ctx && waiting = 0
 absent a demonstrated need. Additional per-hart state exists outside
 this implicit machine: `mepc`/`mcause` (populated only on exception,
 xref:csrs.adoc[Chapter 3]) and, for debug
-(xref:microarchitecture.adoc[Chapter 11]), one per-hart mask bit
-excluded from this state model.
+(xref:debug-support.adoc[Chapter 12]), one per-hart mask bit excluded
+from this state model.
 
 == Boot sequence
 

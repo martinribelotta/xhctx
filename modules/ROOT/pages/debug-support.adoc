@@ -1,0 +1,180 @@
+[#debug-support]
+= Debug Support
+
+xref:hart-model.adoc[Chapter 2] claims that reusing the standard
+RISC-V multi-hart model brings the multi-hart Debug Specification
+along "for free," because every `Xhctx` context is architecturally an
+ordinary hart. That claim holds for hart *identity* -- `mhartid`,
+per-hart CSR state -- but not for hart *scheduling*: the standard
+Debug Module assumes every hart independently fetches and retires
+instructions (or is already halted) on its own physical resource.
+`Xhctx`'s `N` harts share a single physical pipeline
+(xref:hart-model.adoc[Section 2.2]), and only the hart currently
+selected by `active_ctx` (xref:hart-model.adoc[Section 2.5]) executes
+at all. This chapter defines the mechanism that reconciles the two,
+building entirely on hardware the rest of this specification already
+requires.
+
+[NOTE]
+.Non-normative
+====
+Like xref:microarchitecture.adoc[Chapter 11], this chapter is
+reference material describing one way to realize debug support, not a
+conformance requirement -- with the exception of the priority rule in
+Section 12.2 and the per-hart debug state in Section 12.6, which any
+implementation exposing `Xhctx` harts to a RISC-V Debug Module needs in
+some form.
+====
+
+== Debug requests are a fourth trigger class
+
+Every hart switch in this specification -- voluntary (`mctxctl`),
+priority preemption, and forced `ecall` routing -- resolves through the
+same one-cycle squash-and-redirect path
+(xref:context-lifecycle.adoc[Chapter 7],
+xref:microarchitecture.adoc[Chapter 11]). Debug Module requests are a
+fourth trigger on that same path, not a separate mechanism: `haltreq`,
+`resumereq`, and Program Buffer execution requests all drive
+`active_ctx` through the identical hardware already required for
+`mctxctl` and forced preemption.
+
+== Halt and run-request priority
+
+[source]
+----
+DM halt/run request  >  timer/watchdog NMI  >  event preemption  >  mctxctl
+----
+
+Debug requests sit above the timer/watchdog NMI tier
+(xref:priority-preemption.adoc[Section 6.4]), which is itself the
+highest-priority ordinary trigger and is non-maskable by
+`mstatus.MIE` (xref:csrs.adoc[Section 3.8]) for exactly this reason:
+without a trigger that cannot be starved by application-level traffic,
+a hart can defeat forward progress indefinitely. A debugger's halt
+request is subject to the identical hazard -- and to a stronger
+requirement, since an unresponsive debugger defeats the *purpose* of
+the mechanism, not merely its fairness -- so it is placed one tier
+above the NMI class rather than competing with it.
+
+== Halting a hart
+
+Setting `debug_halt[i]` has two effects, both consequences of the
+existing priority-encoder/redirect hardware rather than new state
+machines:
+
+* it withdraws hart `i` from the priority encoder's candidate set
+  (xref:priority-preemption.adoc[Section 6.1]), so hart `i` can never
+  again be selected as `next_ctx` while the bit is set;
+* if hart `i` is `active_ctx` at the moment `debug_halt[i]` is set, the
+  withdrawal itself is the trigger for an immediate forced abandonment,
+  using the same redirect path as any other forced switch. The vacated
+  pipeline slot then falls through to ordinary arbitration -- Case B if
+  another hart is ready, Case C (Idle/Sleep) otherwise
+  (xref:context-lifecycle.adoc[Section 7.2]) -- with no debug-specific
+  successor logic required.
+
+A hart that is `WAITING` or `SUSPENDED`
+(xref:context-lifecycle.adoc[Section 7.3]) when `debug_halt[i]` is set
+requires no redirect at all: it is not fetching, so "no further
+instructions retire" -- the only guarantee the Debug Specification
+actually requires of a halt -- is already true the instant the bit is
+set. There is no unbounded wait for the hart to reach a "haltable"
+point, because exclusion from the priority encoder *is* that point.
+
+== Executing under debug: single-step and the program buffer
+
+Single-stepping a halted hart, or running Program Buffer code for an
+abstract command, requires hart `i` to actually execute instructions --
+i.e. to transiently become `active_ctx` -- while `debug_halt[i]`
+excludes it from ordinary scheduling. A second, DM-private signal,
+`debug_run_req[i]`, resolves this:
+
+* it may only be asserted while `debug_halt[i]` is already set, and is
+  driven exclusively by the Debug Module -- it is not an architectural
+  CSR and is not reachable from `mctxctl`;
+* it shares the top priority tier defined above and drives
+  `active_ctx = i` through the same redirect path;
+* for as long as it is asserted, a one-bit "DM owns the pipeline" latch
+  gates the priority encoder's output, suppressing every other trigger
+  class -- ordinary preemption, `ecall` routing, and the timer/watchdog
+  NMI alike. This is not a new requirement invented for `Xhctx`: the
+  base RISC-V Debug Specification already requires Program Buffer
+  execution to be atomic with respect to interrupts. Because the
+  encoder is already a single, continuously-evaluated combinational
+  block (xref:priority-preemption.adoc[Section 6.1]), this is one
+  additional gating term on its output, not a second scheduler.
+
+Because all hart state is already fully banked per `ctx_id`
+(xref:hart-model.adoc[Section 2.4]), activating hart `i` for debug
+execution sees exactly the state a normal switch would -- no separate
+debug shadow register file is needed.
+
+Completion (an `ebreak` terminating the Program Buffer, or a retired-
+instruction count of one for single-step) is signalled the standard
+way to the Debug Module, which then deasserts `debug_run_req[i]`. The
+latch releases and arbitration resumes normally; hart `i` itself is
+never reselected, since `debug_halt[i]` is still set.
+
+== Direct-bus fast path for GPR and PC access
+
+Routing every register read through Program Buffer execution would
+make even the simplest inspection pay the cost of the mechanism above.
+It is unnecessary for GPRs and PC: both are already banked per
+`ctx_id`, and this specification already has precedent for reading
+banked state across harts (`mepc[ctx_id]`/`mcause[ctx_id]`, read-only
+for any `ctx_id`, xref:csrs.adoc[Section 3.2]). The Debug Module's
+Access Register abstract command for GPRs and PC should be wired as a
+direct bus read/write into the existing banked register file, with no
+instruction execution and no pipeline ownership -- available even
+while a different hart is actively running. Only CSR access that
+requires actual instruction semantics -- for instance anything behind
+the indirect `Smcsrind` window (xref:csrs.adoc[Section 3.2],
+xref:open-issues.adoc[Chapter 13]) -- falls back to `debug_run_req[i]`
+and the Program Buffer.
+
+== Per-hart debug CSR state
+
+`dcsr`, `dpc`, and `dscratch0`/`dscratch1` are ordinary per-hart
+architectural state, exactly like `mepc`/`mcause`
+(xref:hart-model.adoc[Section 2.4]), and are banked per `ctx_id` on
+the same terms. `dpc` freezes the resume PC at the halt boundary the
+same way `mepc` freezes it at a fault boundary -- no new mechanism,
+only one more bank.
+
+.Per-hart debug CSR state
+[cols="1,2", options="header"]
+|===
+| Register | Role
+| `dcsr` | Halt cause, step control, privilege on entry -- standard Debug Specification semantics, banked per `ctx_id`
+| `dpc` | Resume PC on halt, banked per `ctx_id`, same role `mepc` plays for exceptions
+| `dscratch0`, `dscratch1` | Debugger scratch registers, banked per `ctx_id`
+|===
+
+== Exceptions taken during debug-mode execution
+
+Case D (xref:exception-delivery.adoc[Chapter 8]) routes every
+synchronous exception to the exception hart through the event
+mechanism, unconditionally. That is correct for ordinary execution but
+wrong while a hart is executing under `debug_run_req[i]`: the base
+Debug Specification requires such an exception to bypass the normal
+trap path entirely and be reported directly to the Debug Module as an
+abstract-command error, with the hart remaining halted. Case D
+therefore needs one additional guard -- checked before step 1 of its
+existing sequence -- that diverts to this reporting path whenever the
+faulting hart is currently under `debug_run_req[i]`. Every other case
+in xref:context-lifecycle.adoc[Chapter 7] is unaffected.
+
+== Summary of new hardware
+
+Everything above reuses hardware this specification already requires:
+the priority encoder, the one-cycle squash-and-redirect path, the
+fully-banked per-`ctx_id` register file, and the existing Idle/Sleep
+fallback (Case C). The genuinely new hardware is small and local:
+
+* one more input to the priority arbitration, at the top priority tier
+* a one-bit "DM owns the pipeline" latch gating the encoder's output
+  during Program Buffer / single-step execution
+* a direct bus read/write path into the banked GPR/PC array
+* four banked registers per hart: `dcsr`, `dpc`, `dscratch0`,
+  `dscratch1`
+* one guard condition in Case D's exception routing
