@@ -33,6 +33,45 @@ The unit of scheduling ceases to be the interrupt and becomes the
 *hart*. Hart selection is performed entirely by hardware; no
 programmable scheduler exists.
 
+== Motivating Use Cases
+
+[NOTE]
+.Non-normative
+====
+This section is explanatory context for the design choices made
+throughout this specification; it imposes no conformance requirements.
+====
+
+`Xhctx` was originally motivated by two demanding domains that, it
+turns out, want the same thing from the hardware: mission-critical
+aerospace systems, and high-speed network processing in FPGA fabrics.
+
+Aerospace / mission-critical:: What xref:exception-delivery.adoc[Section 8.1]
+calls "recovery is not architecturally defined" for a faulted hart is,
+from this angle, an ARINC-653-style partition boundary enforced by
+hardware rather than by a hypervisor or partitioning kernel -- fewer
+software layers to certify to sustain isolation between subsystems of
+different criticality on the same core. Bubble-free one-cycle
+activation and a precise preemption boundary
+(xref:priority-preemption.adoc[Chapter 6]) give a WCET argument that
+does not depend on how many registers a given ISR happens to touch.
+And a fixed-priority hardware arbiter is a far smaller, more
+exhaustively verifiable artifact than a general RTOS scheduler --
+shifting scheduling from software certification territory (e.g.
+DO-178C) into hardware certification territory (e.g. DO-254).
+
+High-speed network processing in FPGA fabric:: Mandatory bypass
+(xref:software-events.adoc[Chapter 5]) dispatches on the cycle after
+an event with no software polling -- necessary to react to
+"descriptor ready" or "packet arrived" at line rate. Independent
+flows, DMA rings, or virtual channels map naturally onto separate hart
+contexts, arbitrated by fixed priority (e.g. QoS class as `ctx_id`
+priority). Specific to FPGA targets: this is one physical pipeline
+plus `N` banked register files (cheap in BRAM), instead of `N` fully
+duplicated soft-core pipelines (expensive in LUTs/DSPs) to handle `N`
+independent handlers -- with the ergonomics of C instead of
+hand-written FSMs.
+
 == Goals
 
 An `Xhctx`-compliant implementation SHALL provide:
