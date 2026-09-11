@@ -20,7 +20,7 @@ not only at voluntary abandonment:
 
 * When an incoming event's destination hart has *higher* priority than
   `active_ctx`, it preempts immediately, using the same zero-bubble
-  squash-and-redirect path used for voluntary abandonment
+  bank-select switch used for voluntary abandonment
   (xref:hart-model.adoc[Section 2.5], xref:microarchitecture.adoc[Chapter 11]).
 * When it has *equal or lower* priority, it is enqueued
   (xref:software-events.adoc[Section 5.3]).
@@ -33,17 +33,20 @@ This preemption may be paused with `mstatus.MIE = 0`
 == Precise preemption boundary
 
 Multi-cycle operations (pending loads, multi-cycle ALU operations) are
-never preempted mid-flight: while the pipeline is stalled, no fetch
-slot is free for another hart, so preemption is naturally deferred to
-the next instruction boundary. This yields precise-interrupt-boundary
-behavior with no additional hardware.
+never preempted mid-flight: the shared execution units (ALU,
+multiplier, load/store port) are not banked -- only the per-hart
+pipeline latches are (xref:microarchitecture.adoc[Section 11.2]) -- so
+a multi-cycle operation must retire before the unit it occupies can
+serve another hart. This defers preemption to the next instruction
+boundary with no additional hardware, yielding precise-interrupt-
+boundary behavior.
 
 Instruction and data memory ports are physically separate. The I-port
 is driven only by the incoming hart's fetch stage; the D-port only by
 the outgoing hart's still-draining EX/WB memory operation. Because only
-one hart is ever in the pipeline at a time, these accesses safely
-overlap during a switch, and no memory transaction is ever left
-half-complete by a preemption.
+one hart's bank is ever being driven by the shared datapath at a time,
+these accesses safely overlap during a switch, and no memory
+transaction is ever left half-complete by a preemption.
 
 == Timer/watchdog preemption is non-maskable
 

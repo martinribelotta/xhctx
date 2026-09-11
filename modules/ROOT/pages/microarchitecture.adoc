@@ -23,22 +23,36 @@ Target RTL:
 * Each hart exposed as an independent hart to the standard RISC-V
   Debug Module, reusing its existing multi-hart infrastructure
 
-== Pipeline tagging and the zero-bubble switch
+== Pipeline banking and the zero-bubble switch
 
-Only the WB stage writes the register file, and register reads are
-addressed directly by `{ctx_id, reg_num}`, so no read or write port
-ever conflicts between harts. `ctx_id` must nonetheless travel with the
-instruction through every pipeline register (IF/ID, ID/EX, EX/WB),
-because `active_ctx` may already point to the new hart by the time an
-older instruction retires in WB; without a per-stage tag, WB could
-write into the wrong hart's bank.
+Banking is not limited to the register file: the pipeline registers
+themselves (IF/ID, ID/EX, EX/WB) are instantiated once per hart, and
+the shared combinational datapath (decode, ALU, load/store sequencing)
+is time-multiplexed across those banks by `active_ctx`. Register reads
+and writes are addressed directly by `{ctx_id, reg_num}`, so no read or
+write port ever conflicts between harts.
+
+Because the latches themselves are banked, no per-instruction tag needs
+to travel through the pipeline to route WB writes correctly: in any
+given cycle, every stage is necessarily operating on the same bank --
+whichever one `active_ctx` currently selects -- so the destination is
+never ambiguous.
 
 A hart switch (voluntary via `mctxctl`, or forced by arbitration) is a
-standard squash-and-redirect, identical in cost to a jump resolved in a
-single cycle: the instruction already fetched behind the triggering
-instruction is squashed, the outgoing hart's banked PC is frozen at the
-correct resume point without that squashed instruction executing, and
-the incoming hart's fetch begins the very next cycle. This requires
-`mctxctl` (and any hardware-forced switch condition) to resolve within
-a single pipeline stage. Under that constraint, hart activation is
-*one cycle, no bubble* -- not a stall-based drain.
+*bank-select switch*, identical in cost to a jump resolved in a single
+cycle: `active_ctx` changes, and the shared datapath begins reading and
+writing the incoming hart's own latches instead of the outgoing hart's.
+Nothing is squashed and nothing is lost -- the outgoing hart's
+in-flight, not-yet-retired instructions (whatever was sitting in its
+IF/ID, ID/EX, or EX/WB latch) are simply frozen in its own bank,
+untouched, until that hart is reactivated, at which point they resume
+exactly where they left off. This requires `mctxctl` (and any
+hardware-forced switch condition) to resolve within a single pipeline
+stage. Under that constraint, hart activation is *one cycle, no
+bubble* -- not a stall-based drain, and not a discard-and-refetch.
+
+The shared execution units (ALU, multiplier, load/store port) are
+*not* banked -- only the per-stage latches are -- which is why a
+multi-cycle operation is never preempted mid-flight
+(xref:priority-preemption.adoc[Section 6.3]): the unit it occupies has
+only one instance, and cannot serve two harts in the same cycle.

@@ -57,6 +57,20 @@ path" to "there is no trap/context-switch path to accelerate": every
 hart's complete architectural state is its own permanent bank, and the
 underlying trap/`mret` model is replaced rather than sped up.
 
+A more precise way to state the difference: the designs above bank
+*architectural* state (register file, PC, status/PSW) and either
+restrict switching to clean instruction boundaries (as ARM's banked
+FIQ registers and CV32RT do), or share the pipeline's actual latches
+across threads and route work with a per-instruction thread tag (as
+SMT and GPU warp scheduling do). `Xhctx` instead banks the pipeline's
+own latches (IF/ID, ID/EX, EX/WB) per hart
+(xref:microarchitecture.adoc[Section 11.2]): a switch is a bank-select
+on the shared datapath, not a tag-and-route or a squash-and-refetch, so
+an outgoing hart's in-flight, not-yet-retired instructions are frozen
+rather than discarded or squashed. No prior art surveyed for this
+specification banks the pipeline latches themselves for this purpose;
+if a reader knows of one, it belongs in this chapter.
+
 == vs. the RISC-V Hypervisor extension's shadow-state precedent
 
 xref:csrs.adoc[Section 3.3] justifies `Xhctx`'s cross-hart read window

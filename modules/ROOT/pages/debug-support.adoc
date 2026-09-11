@@ -30,7 +30,7 @@ some form.
 
 Every hart switch in this specification -- voluntary (`mctxctl`),
 priority preemption, and forced `ecall` routing -- resolves through the
-same one-cycle squash-and-redirect path
+same one-cycle bank-select switch path
 (xref:context-lifecycle.adoc[Chapter 7],
 xref:microarchitecture.adoc[Chapter 11]). Debug Module requests are a
 fourth trigger on that same path, not a separate mechanism: `haltreq`,
@@ -167,7 +167,7 @@ in xref:context-lifecycle.adoc[Chapter 7] is unaffected.
 == Summary of new hardware
 
 Everything above reuses hardware this specification already requires:
-the priority encoder, the one-cycle squash-and-redirect path, the
+the priority encoder, the one-cycle bank-select switch path, the
 fully-banked per-`ctx_id` register file, and the existing Idle/Sleep
 fallback (Case C). The genuinely new hardware is small and local:
 

@@ -6,7 +6,7 @@
 Voluntary abandonment is performed by writing `mctxctl` -- never by
 `wfi` (xref:compatibility.adoc[Chapter 10]). This is the *voluntary*
 trigger for a hart switch. All other triggers are involuntary,
-hardware-initiated, and reuse the same one-cycle squash-and-redirect
+hardware-initiated, and reuse the same one-cycle bank-select switch
 mechanism (xref:microarchitecture.adoc[Chapter 11]), but they are not
 all alike:
 

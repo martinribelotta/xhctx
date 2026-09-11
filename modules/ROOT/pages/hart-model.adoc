@@ -70,8 +70,12 @@ A hart switch is conceptually:
 active_ctx ← new_ctx
 ----
 
-No register copy and no pipeline reconstruction occurs. `active_ctx`
-is not itself an architectural CSR; a hart reads "which hart am I"
+No register copy and no pipeline reconstruction occurs. The outgoing
+hart's in-flight pipeline content
+(xref:microarchitecture.adoc[Section 11.2]) is frozen in its own bank,
+not discarded, and resumes unchanged the next time that hart is
+selected. `active_ctx` is not itself an architectural CSR; a hart
+reads "which hart am I"
 through `mhartid` (xref:csrs.adoc[Section 3.2]), which is trivially
 always its own identity, since only the hart holding `active_ctx` can
 execute the instruction that reads it.
