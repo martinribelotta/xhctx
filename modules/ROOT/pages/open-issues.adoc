@@ -23,3 +23,8 @@
 * *`ECALL_BASE` reserved range* -- like `SW_TARGET_BASE`
   (xref:event-fabric.adoc[Section 4.3]), its exact width and placement
   within the `event_id` space is not yet fixed.
+* *`mctxctl` `RESTART` targeting `active_ctx`* -- Case F
+  (xref:context-lifecycle.adoc[Section 7.2]) reserves
+  `target_ctx_id == active_ctx`; whether it should be a no-op, an
+  immediate self-restart, or an illegal-instruction exception is not
+  yet decided.

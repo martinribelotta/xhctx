@@ -22,29 +22,42 @@ implementation-defined exception hart -- never through the standard
 The cross-hart read of `mepc[ctx_id]`/`mcause[ctx_id]` is justified in
 xref:csrs.adoc[Section 3.3].
 
-== Recovery is not architecturally defined
+== Recovery is not resumption
 
 A faulting hart's live PC is left frozen at the faulting instruction.
 There is no mechanism -- no writable resume-PC register, no `mret`-like
 instruction -- by which the exception hart or anything else can redirect
-where that hart resumes. Consequently, **a faulted hart is not
-automatically resumable**: dispatching it again would simply re-execute
-the instruction that faulted.
+where that hart resumes *precisely*. Consequently, **a faulted hart is
+not automatically resumable**: dispatching it again via an ordinary
+event would simply re-execute the instruction that faulted.
 
-This is a deliberate choice, not an oversight. Recovery policy is left
-entirely to firmware/system integration, outside this specification:
+This is a deliberate choice, not an oversight. Recovery policy is a
+firmware decision between two tiers, only the first of which needs no
+hardware support at all:
 
 * the simplest and default-safe policy is to treat a faulted hart as
   permanently suspended -- firmware simply never targets its `ctx_id`
   again;
-* any stronger recovery (restarting that hart's actor from a known-good
-  entry point, or a full system reset) requires firmware-level
-  convention and is out of scope here.
+* the stronger policy -- restarting that hart's actor from a known-good
+  entry point -- is Case F
+  (xref:context-lifecycle.adoc[Section 7.2]): M-mode software forces
+  `target_ctx_id` back to the fixed reset vector, and its actor
+  re-enters normal dispatch from there, with no memory of what it was
+  doing when it faulted. This discards the faulted computation; it is
+  a restart, not a resume.
 
-Adding a hardware primitive to redirect a suspended hart's resume point
-was considered and rejected: it would only serve this one case, and the
-same reasoning that keeps `mret` out of this model (see
-xref:compatibility.adoc[Chapter 10]) applies here too -- no operation in
-`Xhctx` restores a precisely-suspended computation and continues it.
-Every reactivation, exception recovery included, is a fresh dispatch
-driven by an event, never a resume.
+A general primitive to redirect a suspended hart's resume point to an
+*arbitrary*, software-chosen PC was considered and rejected: it would
+reopen, in the write direction, the same reactivation race that keeps
+`mepc[ctx_id]` unaliased from the live PC (xref:csrs.adoc[Section
+3.7]) -- and the same reasoning that keeps `mret` out of this model
+(see xref:compatibility.adoc[Chapter 10]) applies here too: no
+operation in `Xhctx` restores a precisely-suspended computation and
+continues it. Case F does not reopen that question -- it never writes
+software-computed data, only the one fixed constant every hart already
+receives at power-on, so there is nothing to race against. Every
+reactivation, exception recovery included, is still a fresh dispatch
+driven by an event, never a resume; restart is only the case where
+firmware chooses to make that fresh dispatch start from a known-good
+address instead of from wherever the faulted actor happened to leave
+off.

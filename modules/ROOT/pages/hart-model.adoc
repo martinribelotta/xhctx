@@ -52,7 +52,11 @@ Each hart owns an independent bank of:
 * `mstatus.MIE` (xref:priority-preemption.adoc[Chapter 6])
 
 All of the above is fully banked, one instance per hart. No hart's
-copy is ever overwritten by another hart's activity.
+copy is ever overwritten by another hart's activity, with one narrow,
+deliberate exception: firmware-requested restart
+(xref:context-lifecycle.adoc[Section 7.2], Case F), which lets one
+hart force a named peer's `PC` back to the fixed reset vector -- never
+to software-computed data.
 
 == The active-hart selector
 

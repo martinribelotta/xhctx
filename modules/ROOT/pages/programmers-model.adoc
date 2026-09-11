@@ -288,8 +288,9 @@ Case D (xref:exception-delivery.adoc[Chapter 8]) routes every
 synchronous exception to one implementation-defined exception hart,
 with `event_data = mectx` -- the id of the *faulting* hart, not the
 exception hart itself. The handler reads that id out of its own event
-payload, then uses the indexed window to inspect the faulting hart's
-frozen state:
+payload, uses the indexed window to inspect the faulting hart's frozen
+state, and picks one of the two recovery tiers named in
+xref:exception-delivery.adoc[Section 8.1]:
 
 [source,c]
 ----
@@ -304,19 +305,31 @@ void exception_actor_loop(void)
 
         log_fault(faulted_ctx, fault_pc, fault_cause);
 
-        /* Default-safe recovery policy (Section 8.1): simply never
-           address faulted_ctx again. No resume mechanism exists --
-           there is no mepc write, no mret, nothing to redirect it. */
+        if (is_restartable(faulted_ctx)) {
+            /* Case F (context-lifecycle.adoc, Section 7.2): restart
+               faulted_ctx's actor from the reset vector. Its register
+               file and whatever it was doing are discarded -- this is
+               not a resume, there is still no mepc write, no mret. */
+            xhctx_restart(faulted_ctx);
+        }
+        /* else: default-safe policy (Section 8.1) -- simply never
+           address faulted_ctx again. */
 
         xhctx_yield();
     }
 }
 ----
 
-Nothing here restarts `faulted_ctx`; per
-xref:exception-delivery.adoc[Section 8.1], that hart is left
-permanently `SUSPENDED` unless firmware convention defines a stronger
-recovery policy, which is out of scope of the extension itself.
+`is_restartable()`, and which `ctx_id`s are allowed to lose their
+actor's state this way, are firmware policy, not part of this
+specification; `xhctx_restart()` is the one primitive `Xhctx` itself
+provides toward that decision, wrapping the `mctxctl` `RESTART` opcode
+(xref:csrs.adoc[Section 3.6]).
+
+Nothing here resumes `faulted_ctx`'s prior computation -- Case F starts
+its actor over, it does not continue it. A hart left off this path
+entirely is still permanently `SUSPENDED`, per
+xref:exception-delivery.adoc[Section 8.1].
 
 == `ecall`: calling into and replying from M-mode
 

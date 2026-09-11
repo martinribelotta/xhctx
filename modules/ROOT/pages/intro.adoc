@@ -47,9 +47,13 @@ turns out, want the same thing from the hardware: mission-critical
 aerospace systems, and high-speed network processing in FPGA fabrics.
 
 Aerospace / mission-critical:: What xref:exception-delivery.adoc[Section 8.1]
-calls "recovery is not architecturally defined" for a faulted hart is,
-from this angle, an ARINC-653-style partition boundary enforced by
-hardware rather than by a hypervisor or partitioning kernel -- fewer
+calls "recovery is not resumption" for a faulted hart is, from this
+angle, an ARINC-653-style partition boundary enforced by hardware
+rather than by a hypervisor or partitioning kernel: a faulted hart
+never silently continues, and even its strongest recovery tier
+(xref:context-lifecycle.adoc[Section 7.2], Case F) is an explicit,
+firmware-decided restart from a known-good state, not an implicit
+continuation -- fewer
 software layers to certify to sustain isolation between subsystems of
 different criticality on the same core. Bubble-free one-cycle
 activation and a precise preemption boundary

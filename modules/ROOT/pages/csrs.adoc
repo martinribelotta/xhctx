@@ -131,8 +131,29 @@ staged payload intact.
 
 == `mctxctl` (WO)
 
-Control register used to voluntarily abandon the current hart
-(xref:context-lifecycle.adoc[Chapter 7]).
+Control register driving two hart-lifecycle operations, distinguished
+by an opcode field:
+
+[source]
+----
+mctxctl = opcode[31:28] | target_ctx_id[3:0]
+
+opcode = 0x0 -> YIELD     voluntary abandonment of the current hart
+                           (xref:context-lifecycle.adoc[Section 7.1]);
+                           target_ctx_id ignored
+
+opcode = 0x1 -> RESTART   force target_ctx_id back to its reset state
+                           (xref:context-lifecycle.adoc[Section 7.2],
+                           Case F); target_ctx_id != active_ctx
+----
+
+(bit layout illustrative, pending the same review as the other draft
+encodings in this chapter.) `YIELD` is always self-targeting and
+cannot name another hart; `RESTART` is the only operation in `Xhctx`
+that lets one hart's software write directly into state belonging to
+another hart -- narrowly, to the fixed reset vector only, never to
+software-computed data (xref:context-lifecycle.adoc[Section 7.2],
+Case F).
 
 == `mepc[ctx_id]` (RO, banked)
 
@@ -182,7 +203,7 @@ mechanism exists to prevent.
 | `0x7C0`
 | WO
 | n/a
-| Voluntary abandonment
+| Voluntary abandonment (`YIELD`); forced restart of a named peer hart (`RESTART`, Case F)
 
 | `mevent`
 | `0x7C1`

@@ -20,6 +20,9 @@ Target RTL:
 * `mepc[ctx_id]` / `mcause[ctx_id]` banks
 * Per-hart mask bit feeding the priority encoder (debug support,
   xref:debug-support.adoc[Chapter 12])
+* Per-hart, individually-addressable reset-vector-load and
+  pipeline-invalidate enables (Case F restart,
+  xref:context-lifecycle.adoc[Section 7.2])
 * Each hart exposed as an independent hart to the standard RISC-V
   Debug Module, reusing its existing multi-hart infrastructure
 
@@ -56,3 +59,20 @@ The shared execution units (ALU, multiplier, load/store port) are
 multi-cycle operation is never preempted mid-flight
 (xref:priority-preemption.adoc[Section 6.3]): the unit it occupies has
 only one instance, and cannot serve two harts in the same cycle.
+
+== Restart reuses the reset datapath
+
+Case F (xref:context-lifecycle.adoc[Section 7.2]) is the one switch
+that deliberately discards a bank's content instead of preserving it.
+It needs no new datapath to do so: power-on reset already has to load
+`RESET_VECTOR` into every hart's `PC` bank and invalidate every
+pipeline latch, broadcast to all 16 banks at once. Case F is the same
+load and the same invalidate, narrowed from a global broadcast to a
+single, `target_ctx_id`-selected bank -- a 16-way enable demux on
+signals that already exist, not a new write port. The only other new
+logic is `mctxctl`'s opcode decode (xref:csrs.adoc[Section 3.6]) and
+the pulse that sets `waiting[target_ctx_id]`, reusing the same bit
+every other wakeup already sets. No change to the priority encoder,
+the FIFOs, or the bank-select mux itself is required: `target_ctx_id`
+simply becomes a normal contender for `next_ctx` on the cycle after
+the restart, indistinguishable from any other Case B wakeup.

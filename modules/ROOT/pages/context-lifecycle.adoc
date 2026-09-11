@@ -5,10 +5,10 @@
 
 Voluntary abandonment is performed by writing `mctxctl` -- never by
 `wfi` (xref:compatibility.adoc[Chapter 10]). This is the *voluntary*
-trigger for a hart switch. All other triggers are involuntary,
-hardware-initiated, and reuse the same one-cycle bank-select switch
-mechanism (xref:microarchitecture.adoc[Chapter 11]), but they are not
-all alike:
+trigger for a hart switch, and it is always self-targeting: a hart can
+only abandon itself. Every other trigger reuses the same one-cycle
+bank-select switch mechanism (xref:microarchitecture.adoc[Chapter 11]),
+but they are not all alike:
 
 * *Priority preemption* (xref:priority-preemption.adoc[Section 6.2]) --
   can occur on any cycle; always resumable, since nothing about the
@@ -19,6 +19,10 @@ all alike:
 * *`ecall` from U-mode* (Case E below) -- hardware-forced, but
   *resumable*: it is an intentional request, not a fault, so the
   calling hart is expected to run again once serviced.
+* *Firmware-requested restart* (Case F below) -- the one trigger that
+  is neither self-targeting nor hardware-forced: M-mode software names
+  a peer `ctx_id` and forces it back to its reset state. Not a resume
+  of anything -- a deliberate discard.
 
 == Cases
 
@@ -91,6 +95,53 @@ already has full access to `mevent`/`meventdata` and has no need for a
 routed request mechanism, so it retains the generic Case D (fault)
 treatment. `ecall` from S-mode is undefined, tracking S-mode's
 out-of-scope status (xref:csrs.adoc[Section 3.1]).
+
+*Case F -- firmware-requested restart.*
+
+[source]
+----
+1. M-mode software writes mctxctl with opcode = RESTART and
+   target_ctx_id != active_ctx (xref:csrs.adoc[Section 3.6]) -- the
+   stronger recovery policy named, but left unmechanized, in
+   xref:exception-delivery.adoc[Section 8.1]
+2. hardware, same cycle, touches target_ctx_id's bank only:
+     PC[target_ctx_id]      <- RESET_VECTOR
+     pipeline latches       <- invalidated (IF/ID, ID/EX, EX/WB)
+     waiting[target_ctx_id] <- 1
+3. target_ctx_id re-enters ordinary priority-encoder contention on the
+   next cycle, exactly like any other Case B wakeup -- no new priority
+   tier is introduced, and active_ctx is left untouched unless
+   target_ctx_id goes on to win arbitration on its own merits
+----
+
+This is not a resume, and does not try to be one.
+`target_ctx_id`'s register file is left untouched, not because its
+contents survive the restart, but because they are irrelevant to it:
+the shared startup code (xref:programmers-model.adoc[Chapter 9])
+recomputes `sp` from `mhartid` and branches to the correct actor loop
+without reading any prior register state, the same way it already does
+for a hart's first-ever dispatch at boot (Section 7.4 below). Case F
+reruns that same path on demand, for one hart, instead of once for all
+harts at reset -- it discards whatever `target_ctx_id`'s actor was
+doing, the same trade a supervisor makes restarting a crashed process
+from `main()` rather than repairing and continuing it.
+
+Case F is the one deliberate exception to
+xref:hart-model.adoc[Section 2.4]'s claim that no hart's copy is ever
+overwritten by another hart's activity: the writing hart and
+`target_ctx_id` are, by construction, different harts. It is
+nonetheless narrower than the general cross-hart write capability
+xref:exception-delivery.adoc[Section 8.1] already considered and
+rejected: `target_ctx_id` never receives software-computed data, only
+the fixed reset vector every hart already receives at power-on, so
+none of the reactivation-race hazard that motivated keeping
+`mepc[ctx_id]` unaliased from the live PC (xref:csrs.adoc[Section 3.7])
+applies here -- there is nothing to race against, because there is
+nothing to read before overwriting.
+
+`target_ctx_id == active_ctx` is reserved; whether it is a no-op, an
+immediate self-restart, or an illegal-instruction exception is not yet
+decided (xref:open-issues.adoc[Chapter 13]).
 
 == Minimal per-hart lifecycle state
 
