@@ -1,6 +1,20 @@
 [#programmers-model]
 = Programmer's Model
 
+[NOTE]
+.Non-normative
+====
+Like xref:microarchitecture.adoc[Chapter 11] and
+xref:debug-support.adoc[Chapter 12], this chapter is reference
+material, not a conformance requirement. Every register access and
+code sequence below is one concrete, illustrative way to drive the
+mechanisms that earlier chapters define normatively -- CSR addresses,
+routing ranges, and encodings are cited by section so they can be
+cross-checked against the chapters that actually define them. Assembly
+is shown in GNU `as` syntax targeting the reference parameter set
+(xref:hart-model.adoc[Section 2.3]): RV32E, 16 harts.
+====
+
 Each hart is implemented as a persistent actor. Conceptual example:
 
 [source,c]
@@ -21,3 +35,400 @@ None of the following exist under `Xhctx`:
 * A software scheduler
 * Software-managed context switching
 * `mret`
+
+The rest of this chapter turns `abandon_context()` and `meventdata`
+above into real CSR accesses, and works through the remaining pieces
+of a complete program: boot, the actor dispatch loop, software-sourced
+IPC, fault handling, and `ecall`.
+
+== CSR access primitives
+
+None of `mctxctl`, `mevent`, or `meventdata` has a name a mainline
+RISC-V assembler recognizes yet -- they are placeholder addresses in a
+legitimate custom range (xref:csrs.adoc[Section 3.1]). This is not a
+problem in practice: `csrr`/`csrw`/`csrwi` accept a raw 12-bit CSR
+address as readily as a symbolic name, so a small header is all a
+toolchain needs, with no assembler patch required.
+
+[source,c]
+----
+/* xhctx.h -- reference CSR access primitives, non-normative. */
+#ifndef XHCTX_H
+#define XHCTX_H
+
+#include <stdint.h>
+
+#define CSR_MCTXCTL     0x7C0   /* WO,    Section 3.6 */
+#define CSR_MEVENT      0x7C1   /* RO/WO, Section 3.4 */
+#define CSR_MEVENTDATA  0x7C2   /* WO,    Section 3.5 (self slot only) */
+#define CSR_MISELECT    0x350   /* Smcsrind, Section 3.3 */
+#define CSR_MIREG       0x351   /* Smcsrind, Section 3.3 */
+
+/* array_sel encoding for the indexed window, Section 3.3 (draft). */
+#define XHCTX_ARRAY_MEVENTDATA  0u
+#define XHCTX_ARRAY_MEPC        1u
+#define XHCTX_ARRAY_MCAUSE      2u
+#define XHCTX_CUSTOM_BIT        (1u << 31)
+
+/* mctxctl: voluntary abandonment (Section 7.1). Any write triggers it;
+   the value is not architecturally meaningful. */
+static inline void xhctx_yield(void)
+{
+    __asm__ volatile ("csrwi %0, 0" :: "i" (CSR_MCTXCTL));
+}
+
+/* mevent, read form: the event_id that activated this hart. */
+static inline uint32_t xhctx_event_id(void)
+{
+    uint32_t id;
+    __asm__ volatile ("csrr %0, %1" : "=r" (id) : "i" (CSR_MEVENT));
+    return id;
+}
+
+/* meventdata + mevent, write form: stage a payload, then push it to
+   event_id (Chapter 5). The two writes are not atomic with respect to
+   preemption, but Section 3.5 explains why that is still safe: an
+   unindexed write can only ever land in the writer's own slot. */
+static inline void xhctx_emit(uint32_t event_id, uint32_t event_data)
+{
+    __asm__ volatile ("csrw %0, %1" :: "i" (CSR_MEVENTDATA), "r" (event_data));
+    __asm__ volatile ("csrw %0, %1" :: "i" (CSR_MEVENT), "r" (event_id));
+}
+
+/* mhartid, standard CSR, M-mode only -- Section 3.2. */
+static inline uint32_t xhctx_hart_id(void)
+{
+    uint32_t id;
+    __asm__ volatile ("csrr %0, mhartid" : "=r" (id));
+    return id;
+}
+
+/* Indexed read of meventdata[ctx_id] / mepc[ctx_id] / mcause[ctx_id]
+   via Smcsrind, valid for any ctx_id including the reader's own
+   (Section 3.3). */
+static inline uint32_t xhctx_indexed_read(uint32_t array_sel, uint32_t ctx_id)
+{
+    uint32_t sel = XHCTX_CUSTOM_BIT | (array_sel << 4) | (ctx_id & 0xFu);
+    uint32_t val;
+    __asm__ volatile ("csrw %0, %1" :: "i" (CSR_MISELECT), "r" (sel));
+    __asm__ volatile ("csrr %0, %1" : "=r" (val) : "i" (CSR_MIREG));
+    return val;
+}
+
+#define xhctx_eventdata_of(ctx_id) xhctx_indexed_read(XHCTX_ARRAY_MEVENTDATA, (ctx_id))
+#define xhctx_mepc_of(ctx_id)      xhctx_indexed_read(XHCTX_ARRAY_MEPC,       (ctx_id))
+#define xhctx_mcause_of(ctx_id)    xhctx_indexed_read(XHCTX_ARRAY_MCAUSE,     (ctx_id))
+
+#endif /* XHCTX_H */
+----
+
+Note that reading a hart's own `meventdata` slot still goes through the
+indexed window, not a direct read at `0x7C2`: Section 3.5 only defines
+a *write* form at that address. `xhctx_eventdata_of(xhctx_hart_id())`
+is the correct way for an actor to read its own payload.
+
+== Boot and initialization
+
+Reset activates exactly one hart, `ctx0`, from the reset PC; every
+other hart starts `SUSPENDED` (xref:context-lifecycle.adoc[Section
+7.4]). Because no hart-independent hardware initialization path exists
+beyond that, `ctx1`..`ctx15` share the same reset-vector entry point as
+`ctx0` -- they simply never fetch an instruction from it until `ctx0`
+first addresses them, whereupon they begin executing at that same
+frozen initial PC. `mhartid` is what turns one shared entry point into
+per-hart behavior:
+
+[source,asm]
+----
+        .equ    STACK_SHIFT, 10         /* 1 KiB per-hart stack */
+
+        .section .init
+        .globl  _start
+_start:
+        csrr    t0, mhartid            /* t0 = ctx_id, Section 3.2 */
+        la      t1, __stack_top
+        slli    t2, t0, STACK_SHIFT
+        sub     sp, t1, t2              /* disjoint stack per hart, no OS allocator */
+
+        bnez    t0, worker_entry        /* only ctx0 owns global C init */
+
+        la      t0, __bss_start
+        la      t1, __bss_end
+1:      bge     t0, t1, 2f
+        sw      zero, 0(t0)
+        addi    t0, t0, 4
+        j       1b
+2:      j       ctx0_main
+
+worker_entry:
+        j       worker_main
+----
+
+Registers past `a5`/`t2` are deliberately avoided above: RV32E exposes
+only `x0`-`x15`, so the usual `t3`-`t6`, `s2`-`s11`, `a6`, `a7` do not
+exist (xref:compatibility.adoc[Chapter 10]).
+
+`ctx0_main` then brings up the platform and *wakes* the other harts it
+needs entirely in software, by addressing their `SW_TARGET_BASE +
+ctx_id` identity-routed event (xref:event-fabric.adoc[Section 4.3]) --
+there is no dedicated "start this hart" instruction:
+
+[source,c]
+----
+#include "xhctx.h"
+
+/* Illustrative; the exact width/placement of this range is an open
+   issue (xref:open-issues.adoc[Chapter 13]). */
+#define SW_TARGET_BASE  0x000u
+
+#define CTX_AUDIO   1u
+#define CTX_EXC     2u
+
+static inline void xhctx_send(uint32_t dest_ctx, uint32_t payload)
+{
+    xhctx_emit(SW_TARGET_BASE + dest_ctx, payload);
+}
+
+void ctx0_main(void)
+{
+    platform_init();
+
+    /* First dispatch of ctx1/ctx2 -- Section 7.4. The payload is a
+       firmware convention, unused here. */
+    xhctx_send(CTX_AUDIO, 0);
+    xhctx_send(CTX_EXC, 0);
+
+    supervisor_actor_loop();   /* ctx0 becomes an ordinary actor too */
+}
+
+void worker_main(void)
+{
+    switch (xhctx_hart_id()) {
+    case CTX_AUDIO:
+        audio_actor_loop();
+        break;
+    case CTX_EXC:
+        exception_actor_loop();
+        break;
+    default:
+        for (;;) xhctx_yield();   /* unused hart: never targeted */
+    }
+}
+----
+
+== The actor loop and voluntary abandonment
+
+`xhctx_yield()` is `abandon_context()` from the opening example. Case
+A (xref:context-lifecycle.adoc[Section 7.2]) means a hart with more
+work already queued resumes *at the instruction after its own
+`xhctx_yield()` call*, with `mevent`/`meventdata` already refreshed to
+the next entry -- there is no explicit "wait for an event" primitive to
+call, because that is exactly what abandonment already does:
+
+[source,c]
+----
+void audio_actor_loop(void)
+{
+    for (;;) {
+        uint32_t sample_id = xhctx_event_id();
+        process_audio(sample_id);
+        xhctx_yield();   /* Case A/B/C decide what runs next; this hart
+                             resumes right here, whichever it was */
+    }
+}
+----
+
+A hart that must distinguish between several kinds of incoming events
+reads both `mevent` and its own `meventdata` slot on each iteration:
+
+[source,c]
+----
+void supervisor_actor_loop(void)
+{
+    const uint32_t self = xhctx_hart_id();
+
+    for (;;) {
+        uint32_t id   = xhctx_event_id();
+        uint32_t data = xhctx_eventdata_of(self);
+
+        dispatch(id, data);
+        xhctx_yield();
+    }
+}
+----
+
+This *is* the thread model: there is no stack to save, no register
+file to spill, and nothing an OS needs to schedule. Every general-
+purpose register, including `sp`, is already banked per hart
+(xref:hart-model.adoc[Section 2.4]), so `xhctx_yield()` and reactivation
+are ordinary control flow from the compiler's point of view, not a
+context switch from the programmer's.
+
+== Emitting software events
+
+`xhctx_send()`, introduced above for boot, is the general IPC primitive
+(xref:software-events.adoc[Chapter 5]): stage a payload, then push it
+to a destination hart's identity-routed event. A worker replying to
+whoever last signalled it needs nothing beyond what is already in its
+own event payload -- there is no hardware-stamped sender id
+(xref:software-events.adoc[Section 5.2]), so the convention has to
+carry the origin explicitly:
+
+[source,c]
+----
+void audio_actor_notify_done(uint32_t requester_ctx, uint32_t status)
+{
+    xhctx_send(requester_ctx, status);
+}
+----
+
+== Fault handling: the exception hart
+
+Case D (xref:exception-delivery.adoc[Chapter 8]) routes every
+synchronous exception to one implementation-defined exception hart,
+with `event_data = mectx` -- the id of the *faulting* hart, not the
+exception hart itself. The handler reads that id out of its own event
+payload, then uses the indexed window to inspect the faulting hart's
+frozen state:
+
+[source,c]
+----
+void exception_actor_loop(void)
+{
+    const uint32_t self = xhctx_hart_id();
+
+    for (;;) {
+        uint32_t faulted_ctx = xhctx_eventdata_of(self);   /* = mectx */
+        uint32_t fault_pc    = xhctx_mepc_of(faulted_ctx);
+        uint32_t fault_cause = xhctx_mcause_of(faulted_ctx);
+
+        log_fault(faulted_ctx, fault_pc, fault_cause);
+
+        /* Default-safe recovery policy (Section 8.1): simply never
+           address faulted_ctx again. No resume mechanism exists --
+           there is no mepc write, no mret, nothing to redirect it. */
+
+        xhctx_yield();
+    }
+}
+----
+
+Nothing here restarts `faulted_ctx`; per
+xref:exception-delivery.adoc[Section 8.1], that hart is left
+permanently `SUSPENDED` unless firmware convention defines a stronger
+recovery policy, which is out of scope of the extension itself.
+
+== `ecall`: calling into and replying from M-mode
+
+Case E (xref:context-lifecycle.adoc[Section 7.2]) is the one place in
+`Xhctx` that behaves like an ordinary blocking call from the caller's
+point of view, even though nothing underneath is a hardware call/return:
+the calling hart's PC freezes at the instruction *after* `ecall`, and
+reactivation -- driven by an ordinary reply event, like any other Case
+A/B dispatch -- always resumes exactly there.
+
+`mevent`/`meventdata` are M-mode-only CSRs
+(xref:csrs.adoc[Section 3.1]), so a U-mode hart cannot stage a request
+payload through them the way the examples above do; `ecall` carries
+only `mectx` automatically. Everything else -- which syscall, which
+arguments, where the result goes -- is an in-memory descriptor, by
+firmware convention (xref:software-events.adoc[Section 5.2]):
+
+[source,c]
+----
+struct syscall_desc {
+    uint32_t          nr;
+    uint32_t          arg0;
+    uint32_t          arg1;
+    volatile uint32_t result;
+};
+
+/* One slot per hart that is ever allowed to ecall. */
+extern volatile struct syscall_desc g_syscall_desc[16];
+----
+
+=== Call side (U-mode)
+
+A U-mode hart cannot read `mhartid` either -- it is Machine-level-only
+by the standard CSR privilege check (xref:csrs.adoc[Section 3.2]) -- so
+it cannot compute `&g_syscall_desc[self]` on its own. Its M-mode boot
+code does that once, before this `ctx_id` ever executes U-mode code,
+and leaves the pointer in `tp` (`x4`): the calling convention already
+reserves that register for exactly this kind of per-context data, and
+like every other GPR it is banked and preserved automatically across
+the `ecall`/reply cycle, needing no runtime support to keep it alive
+(xref:hart-model.adoc[Section 2.4]).
+
+[source,c]
+----
+/* M-mode, runs once for this ctx_id before it ever executes as U-mode.
+   How a ctx_id's privilege level is itself fixed is implementation-
+   defined (xref:open-issues.adoc[Chapter 13]); this assumes it is
+   fixed per ctx_id by construction, since mret cannot be used to drop
+   privilege (xref:compatibility.adoc[Chapter 10]). */
+void user_worker_boot(void)
+{
+    uint32_t self = xhctx_hart_id();
+    __asm__ volatile ("mv tp, %0" :: "r" (&g_syscall_desc[self]));
+    user_actor_entry();
+}
+----
+
+[source,c]
+----
+/* U-mode. No CSR access here at all -- ecall is the entire interface. */
+static inline uint32_t syscall2(uint32_t nr, uint32_t a0, uint32_t a1)
+{
+    volatile struct syscall_desc *d;
+    __asm__ volatile ("mv %0, tp" : "=r" (d));
+
+    d->nr   = nr;
+    d->arg0 = a0;
+    d->arg1 = a1;
+
+    __asm__ volatile ("ecall" ::: "memory");
+    /* Case E force-abandons this hart here; it resumes at this exact
+       point once the service hart's reply event arrives. */
+
+    return d->result;
+}
+----
+
+=== Receive side (M-mode service hart)
+
+The service hart's `ECALL_BASE + ctx_id` routing entry
+(xref:event-fabric.adoc[Section 4.3]) is firmware-configured per caller;
+several callers may route to the same service hart, distinguished by
+`mectx`:
+
+[source,c]
+----
+/* Illustrative; exact width/placement is an open issue
+   (xref:open-issues.adoc[Chapter 13]). */
+#define ECALL_BASE  0x080u
+
+void syscall_service_loop(void)
+{
+    const uint32_t self = xhctx_hart_id();
+
+    for (;;) {
+        uint32_t id = xhctx_event_id();
+
+        if (id >= ECALL_BASE && id < ECALL_BASE + 16u) {
+            uint32_t caller = xhctx_eventdata_of(self);   /* = mectx */
+            volatile struct syscall_desc *d = &g_syscall_desc[caller];
+
+            d->result = do_syscall(d->nr, d->arg0, d->arg1);
+
+            xhctx_send(caller, 0);   /* ordinary reply, Section 7.2 --
+                                         no dedicated "return" mechanism */
+        }
+
+        xhctx_yield();
+    }
+}
+----
+
+No new mechanism appears on the reply path: from the service hart's
+side, replying to an `ecall` is the same `xhctx_send()` used for every
+other piece of software-sourced IPC in this chapter.
